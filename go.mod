@@ -11,12 +11,11 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/pquerna/otp v1.4.0
 	github.com/redis/go-redis/v9 v9.17.2
-	github.com/tesserix/go-shared v0.0.0
+	github.com/tesserix/go-shared v1.0.0
 	golang.org/x/oauth2 v0.24.0
 )
 
 require (
-	github.com/Tesseract-Nexus/go-shared v1.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc // indirect
 	github.com/bytedance/sonic v1.11.6 // indirect
