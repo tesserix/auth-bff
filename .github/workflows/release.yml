@@ -45,7 +45,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Configure private modules
-        run: git config --global url."https://${{ secrets.GO_MODULE_TOKEN }}@github.com/".insteadOf "https://github.com/"
+        run: git config --global url."https://${{ secrets.GO_PRIVATE_TOKEN }}@github.com/".insteadOf "https://github.com/"
         env:
           GOPRIVATE: github.com/tesserix/*
 
@@ -156,7 +156,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            GITHUB_TOKEN=${{ secrets.GO_MODULE_TOKEN }}
+            GITHUB_TOKEN=${{ secrets.GO_PRIVATE_TOKEN }}
           cache-from: type=gha,scope=release
           cache-to: type=gha,mode=max,scope=release
           platforms: linux/amd64
