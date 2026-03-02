@@ -28,6 +28,7 @@ permissions:
 
 env:
   GO_VERSION: "1.25"
+  GOPRIVATE: github.com/tesserix/*
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   GCP_PROJECT_ID: tesseracthub-480811
@@ -54,9 +55,11 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Configure private modules
-        run: git config --global url."https://${{ secrets.GO_PRIVATE_TOKEN }}@github.com/".insteadOf "https://github.com/"
+        run: |
+          echo "Token length: ${#TOKEN}"
+          git config --global url."https://${TOKEN}@github.com/".insteadOf "https://github.com/"
         env:
-          GOPRIVATE: github.com/tesserix/*
+          TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
 
       - name: Download dependencies
         run: go mod download
