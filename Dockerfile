@@ -2,10 +2,12 @@ FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
-# Install git for module downloads
-RUN apk add --no-cache git
+RUN apk add --no-cache git ca-certificates
 
-# Copy dependency files first for caching
+ARG GITHUB_TOKEN
+ENV GOPRIVATE=github.com/tesserix/*
+RUN git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+
 COPY go.mod go.sum ./
 RUN go mod download
 
