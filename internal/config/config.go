@@ -182,7 +182,7 @@ func (c *Config) buildAppConfigs() []AppConfig {
 			ClientID:      c.InternalClientID,
 			ClientSecret:  c.InternalClientSecret,
 			SessionCookie: "bff_home_session",
-			CallbackPath:  "/api/auth/callback",
+			CallbackPath:  "/auth/callback",
 			PostLoginURL:  "/",
 			PostLogoutURL: "/login",
 			AllowedOrigins: c.homeOrigins(),
