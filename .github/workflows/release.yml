@@ -298,7 +298,7 @@ jobs:
             --allow-unauthenticated \
             --ingress=internal-and-cloud-load-balancing \
             --execution-environment=gen1 \
-            --vpc-connector=projects/${{ env.GCP_PROJECT_ID }}/locations/asia-south1/connectors/gl-prod-vpc-connector \
+            --vpc-connector=projects/${{ env.GCP_PROJECT_ID }}/locations/asia-south1/connectors/hc-prod-vpc-connector \
             --vpc-egress=private-ranges-only \
             --set-env-vars="\
           APP_ENV=production,\
