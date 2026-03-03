@@ -41,16 +41,21 @@ func NewProxyHandler(cfg *config.Config, store session.Store, oidcMgr *oidc.Mana
 
 // RegisterRoutes registers the API proxy catch-all route.
 func (h *ProxyHandler) RegisterRoutes(r *gin.Engine) {
-	api := r.Group("/api")
-	api.Use(middleware.SessionExtractor(h.store))
-	api.Use(middleware.RequireSession())
+	// Single catch-all for /api/* with internal dispatch to avoid Gin route conflicts.
+	r.Any("/api/*path", middleware.SessionExtractor(h.store), middleware.RequireSession(), h.dispatch)
+}
 
-	// Specific routes that bypass the generic proxy
-	api.GET("/tenants/user-tenants", h.UserTenants)
-	api.PUT("/tenants/set-default", h.SetDefaultTenant)
-
-	// Catch-all proxy
-	api.Any("/*path", h.Proxy)
+// dispatch routes specific API paths to dedicated handlers, falling back to the proxy.
+func (h *ProxyHandler) dispatch(c *gin.Context) {
+	path := c.Param("path")
+	switch {
+	case c.Request.Method == http.MethodGet && path == "/tenants/user-tenants":
+		h.UserTenants(c)
+	case c.Request.Method == http.MethodPut && path == "/tenants/set-default":
+		h.SetDefaultTenant(c)
+	default:
+		h.Proxy(c)
+	}
 }
 
 // Proxy forwards authenticated requests to the API gateway with JWT injection.
