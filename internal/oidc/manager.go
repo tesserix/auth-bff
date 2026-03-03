@@ -8,71 +8,73 @@ import (
 	"github.com/tesserix/auth-bff/internal/config"
 )
 
-// Manager manages OIDC providers for multiple realms.
+// Manager manages OIDC providers keyed by realm:clientId.
 type Manager struct {
-	providers map[string]Provider // realm name → provider
+	providers map[string]Provider
 	mu        sync.RWMutex
 }
 
-// NewManager creates a Manager and initializes providers for all configured realms.
+// NewManager creates a Manager and initializes providers for all unique
+// realm:clientId combinations found across the configured apps.
 func NewManager(ctx context.Context, cfg *config.Config) (*Manager, error) {
 	m := &Manager{
 		providers: make(map[string]Provider),
 	}
 
-	// Internal realm (admin, home, onboarding)
-	internalIssuer := fmt.Sprintf("%s/realms/%s", cfg.KeycloakURL, cfg.InternalRealm)
-	internalInternal := ""
-	if cfg.KeycloakInternalURL != "" {
-		internalInternal = fmt.Sprintf("%s/realms/%s", cfg.KeycloakInternalURL, cfg.InternalRealm)
-	}
+	seen := make(map[string]bool)
+	for _, app := range cfg.Apps {
+		key := app.Realm + ":" + app.ClientID
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 
-	internalProvider, err := NewKeycloakProvider(ctx, ProviderConfig{
-		IssuerURL:    internalIssuer,
-		InternalURL:  internalInternal,
-		ClientID:     cfg.InternalClientID,
-		ClientSecret: cfg.InternalClientSecret,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("internal provider: %w", err)
-	}
-	m.providers[cfg.InternalRealm] = internalProvider
+		baseURL := cfg.KeycloakURL
+		internalURL := cfg.KeycloakInternalURL
 
-	// Customer realm (storefront) — supports separate Keycloak instance
-	customerBaseURL := cfg.CustomerKeycloakPublicURL()
-	customerIssuer := fmt.Sprintf("%s/realms/%s", customerBaseURL, cfg.CustomerRealm)
-	customerInternal := ""
-	if url := cfg.CustomerKeycloakDiscoveryURL(); url != "" {
-		customerInternal = fmt.Sprintf("%s/realms/%s", url, cfg.CustomerRealm)
-	}
+		// Use customer Keycloak URLs for customer realm
+		if app.Realm == cfg.CustomerRealm {
+			baseURL = cfg.CustomerKeycloakPublicURL()
+			if u := cfg.CustomerKeycloakDiscoveryURL(); u != "" {
+				internalURL = u
+			}
+		}
 
-	customerProvider, err := NewKeycloakProvider(ctx, ProviderConfig{
-		IssuerURL:    customerIssuer,
-		InternalURL:  customerInternal,
-		ClientID:     cfg.CustomerClientID,
-		ClientSecret: cfg.CustomerClientSecret,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("customer provider: %w", err)
+		issuer := fmt.Sprintf("%s/realms/%s", baseURL, app.Realm)
+		internal := ""
+		if internalURL != "" {
+			internal = fmt.Sprintf("%s/realms/%s", internalURL, app.Realm)
+		}
+
+		provider, err := NewKeycloakProvider(ctx, ProviderConfig{
+			IssuerURL:    issuer,
+			InternalURL:  internal,
+			ClientID:     app.ClientID,
+			ClientSecret: app.ClientSecret,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("provider %s: %w", key, err)
+		}
+		m.providers[key] = provider
 	}
-	m.providers[cfg.CustomerRealm] = customerProvider
 
 	return m, nil
 }
 
-// GetProvider returns the OIDC provider for the given realm.
-func (m *Manager) GetProvider(realm string) (Provider, error) {
+// GetProvider returns the OIDC provider for the given key (realm:clientId).
+func (m *Manager) GetProvider(key string) (Provider, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	p, ok := m.providers[realm]
+	p, ok := m.providers[key]
 	if !ok {
-		return nil, fmt.Errorf("no OIDC provider for realm %q", realm)
+		return nil, fmt.Errorf("no OIDC provider for key %q", key)
 	}
 	return p, nil
 }
 
 // GetProviderForApp returns the OIDC provider for an app config.
 func (m *Manager) GetProviderForApp(app *config.AppConfig) (Provider, error) {
-	return m.GetProvider(app.Realm)
+	key := app.Realm + ":" + app.ClientID
+	return m.GetProvider(key)
 }

@@ -15,14 +15,13 @@ import (
 
 func testConfig() *config.Config {
 	return &config.Config{
-		Environment: "development",
-		BaseDomain:  "tesserix.app",
-		HomeDomain:  "tesserix.app",
-		SessionMaxAge: 86400,
+		Environment:    "development",
+		PlatformDomain: "tesserix.app",
+		SessionMaxAge:  86400,
 		Apps: []config.AppConfig{
-			{Name: "admin", SessionCookie: "bff_session", Realm: "internal", PostLoginURL: "/", PostLogoutURL: "/login"},
-			{Name: "storefront", SessionCookie: "bff_storefront_session", Realm: "customers", PostLoginURL: "/", PostLogoutURL: "/"},
-			{Name: "home", SessionCookie: "bff_home_session", Realm: "internal", PostLoginURL: "/", PostLogoutURL: "/login"},
+			{Name: "admin", SessionCookie: "bff_session", Realm: "internal", PostLoginURL: "/", PostLogoutURL: "/login", ProductDomain: "tesserix.app"},
+			{Name: "storefront", SessionCookie: "bff_storefront_session", Realm: "customers", PostLoginURL: "/", PostLogoutURL: "/", ProductDomain: "tesserix.app"},
+			{Name: "home", SessionCookie: "bff_home_session", Realm: "internal", PostLoginURL: "/", PostLogoutURL: "/login", ProductDomain: "tesserix.app"},
 		},
 	}
 }
@@ -198,24 +197,26 @@ func TestSanitizeReturnTo(t *testing.T) {
 
 func TestExtractTenantSlug(t *testing.T) {
 	tests := []struct {
-		host       string
-		baseDomain string
-		want       string
+		host          string
+		productDomain string
+		want          string
 	}{
 		{"demo-admin.tesserix.app", "tesserix.app", "demo"},
 		{"mystore-admin.tesserix.app", "tesserix.app", "mystore"},
 		{"demo.tesserix.app", "tesserix.app", "demo"},
 		{"www.tesserix.app", "tesserix.app", ""}, // known subdomain
 		{"api.tesserix.app", "tesserix.app", ""},  // known subdomain
+		{"dev.tesserix.app", "tesserix.app", ""},  // known subdomain
 		{"tesserix.app", "tesserix.app", ""},       // root
 		{"localhost:3000", "tesserix.app", ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.host, func(t *testing.T) {
-			got := extractTenantSlug(tt.host, tt.baseDomain)
+			app := &config.AppConfig{ProductDomain: tt.productDomain}
+			got := extractTenantSlug(tt.host, app)
 			if got != tt.want {
-				t.Errorf("extractTenantSlug(%q, %q) = %q, want %q", tt.host, tt.baseDomain, got, tt.want)
+				t.Errorf("extractTenantSlug(%q, {ProductDomain:%q}) = %q, want %q", tt.host, tt.productDomain, got, tt.want)
 			}
 		})
 	}

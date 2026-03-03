@@ -111,7 +111,8 @@ func GetEffectiveHost(c *gin.Context) string {
 }
 
 // GetCookieDomain determines the cookie domain from the request host.
-func GetCookieDomain(host, baseDomain, homeDomain string) string {
+// Uses the app's product domain and the platform domain for cross-subdomain cookies.
+func GetCookieDomain(host string, app *config.AppConfig, platformDomain string) string {
 	host = strings.ToLower(host)
 
 	// Localhost: no domain (browser defaults)
@@ -119,12 +120,19 @@ func GetCookieDomain(host, baseDomain, homeDomain string) string {
 		return ""
 	}
 
-	// Platform domains: set cross-subdomain cookie
-	if strings.HasSuffix(host, "."+baseDomain) || host == baseDomain {
-		return "." + baseDomain
+	// Check app's product domain
+	if app != nil && app.ProductDomain != "" {
+		d := app.ProductDomain
+		if strings.HasSuffix(host, "."+d) || host == d {
+			return "." + d
+		}
 	}
-	if strings.HasSuffix(host, "."+homeDomain) || host == homeDomain {
-		return "." + homeDomain
+
+	// Check platform domain
+	if platformDomain != "" {
+		if strings.HasSuffix(host, "."+platformDomain) || host == platformDomain {
+			return "." + platformDomain
+		}
 	}
 
 	// Custom domains: strip www, set parent domain
@@ -135,8 +143,5 @@ func GetCookieDomain(host, baseDomain, homeDomain string) string {
 }
 
 func clearSessionCookie(c *gin.Context, app *config.AppConfig) {
-	host := GetEffectiveHost(c)
-	// We don't know baseDomain/homeDomain here, so just clear with empty domain
 	c.SetCookie(app.SessionCookie, "", -1, "/", "", false, true)
-	_ = host // Used for domain calculation when we have config access
 }

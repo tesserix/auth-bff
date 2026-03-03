@@ -1,0 +1,67 @@
+# Product registry for auth-bff
+# Mounted as ConfigMap in K8s, loaded from PRODUCTS_CONFIG_PATH env var.
+# Secrets are referenced by env var name (clientSecretEnv) — never inline.
+
+platformDomain: tesserix.app
+
+products:
+  - name: tesserix
+    domain: tesserix.app
+    apps:
+      - name: home
+        hosts:
+          - "tesserix.app"
+          - "www.tesserix.app"
+          - "dev.tesserix.app"
+          - "localhost:3002"
+        realm: internal
+        clientId: platform
+        clientSecretEnv: PLATFORM_CLIENT_SECRET
+        sessionCookie: bff_home_session
+        callbackPath: /auth/callback
+        postLoginUrl: /admin/dashboard
+        postLogoutUrl: /login
+        authContext: staff
+        allowedOrigins:
+          - "https://tesserix.app"
+          - "https://www.tesserix.app"
+          - "https://dev.tesserix.app"
+          - "http://localhost:3002"
+
+  # Phase 2 — uncomment when migrating marketplace
+  # - name: marketplace
+  #   domain: mark8ly.com
+  #   apps:
+  #     - name: admin
+  #       hosts: ["*-admin.mark8ly.com", "admin.localhost", "localhost:3000"]
+  #       realm: internal
+  #       clientId: marketplace-dashboard
+  #       clientSecretEnv: MARKETPLACE_DASHBOARD_CLIENT_SECRET
+  #       sessionCookie: bff_session
+  #       callbackPath: /auth/callback
+  #       postLoginUrl: /
+  #       postLogoutUrl: /login
+  #       authContext: staff
+  #       allowedOrigins: ["https://*-admin.mark8ly.com", "http://localhost:3000"]
+  #     - name: storefront
+  #       hosts: ["*.mark8ly.com"]
+  #       realm: customers
+  #       clientId: storefront-bff
+  #       clientSecretEnv: STOREFRONT_BFF_CLIENT_SECRET
+  #       sessionCookie: bff_storefront_session
+  #       callbackPath: /auth/callback
+  #       postLoginUrl: /
+  #       postLogoutUrl: /
+  #       authContext: customer
+  #       allowedOrigins: ["https://*.mark8ly.com"]
+  #     - name: onboarding
+  #       hosts: ["onboarding.mark8ly.com", "*-onboarding.mark8ly.com", "localhost:3001"]
+  #       realm: internal
+  #       clientId: marketplace-dashboard
+  #       clientSecretEnv: MARKETPLACE_DASHBOARD_CLIENT_SECRET
+  #       sessionCookie: bff_session
+  #       callbackPath: /auth/callback
+  #       postLoginUrl: /
+  #       postLogoutUrl: /login
+  #       authContext: staff
+  #       allowedOrigins: ["https://onboarding.mark8ly.com", "http://localhost:3001"]

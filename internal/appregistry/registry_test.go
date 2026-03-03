@@ -16,7 +16,7 @@ func testApps() []config.AppConfig {
 		},
 		{
 			Name:          "home",
-			Hosts:         []string{"tesserix.app", "www.tesserix.app", "company.tesserix.app", "localhost:3002"},
+			Hosts:         []string{"tesserix.app", "www.tesserix.app", "dev.tesserix.app", "localhost:3002"},
 			SessionCookie: "bff_home_session",
 			AuthContext:   "staff",
 		},
@@ -52,7 +52,7 @@ func TestResolve(t *testing.T) {
 		// Home hosts
 		{"home root", "tesserix.app", "home", false},
 		{"home www", "www.tesserix.app", "home", false},
-		{"home company", "company.tesserix.app", "home", false},
+		{"home dev", "dev.tesserix.app", "home", false},
 		{"home localhost", "localhost:3002", "home", false},
 
 		// Onboarding hosts

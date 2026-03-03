@@ -33,18 +33,16 @@ func (r *Registry) Resolve(host string) *config.AppConfig {
 		return nil
 	}
 
-	// Priority order: home > onboarding > admin > storefront (most specific first)
-	// Home and onboarding have exact hosts, admin has prefix patterns,
-	// storefront is the catch-all wildcard.
-	var storefrontApp *config.AppConfig
+	// Two-pass resolution: specific matches first, catch-all apps last.
+	// A catch-all app is one where ALL hosts are wildcard patterns (e.g. "*.domain").
+	var catchAllApp *config.AppConfig
 
 	for i := range r.apps {
 		app := &r.apps[i]
 		for _, pattern := range app.Hosts {
 			if matchHost(host, pattern) {
-				// Storefront is the catch-all — only use if nothing else matches
-				if app.Name == "storefront" {
-					storefrontApp = app
+				if isCatchAll(app) {
+					catchAllApp = app
 					continue
 				}
 				return app
@@ -52,7 +50,7 @@ func (r *Registry) Resolve(host string) *config.AppConfig {
 		}
 	}
 
-	return storefrontApp
+	return catchAllApp
 }
 
 // ResolveByName finds an AppConfig by its name.
@@ -75,6 +73,17 @@ func (r *Registry) AllApps() []config.AppConfig {
 	out := make([]config.AppConfig, len(r.apps))
 	copy(out, r.apps)
 	return out
+}
+
+// isCatchAll returns true if all of an app's host patterns are wildcards.
+// Apps with only wildcard hosts act as catch-all (lowest priority).
+func isCatchAll(app *config.AppConfig) bool {
+	for _, h := range app.Hosts {
+		if !strings.HasPrefix(h, "*") {
+			return false
+		}
+	}
+	return true
 }
 
 // matchHost checks if a host matches a pattern. Supports * wildcard prefix.

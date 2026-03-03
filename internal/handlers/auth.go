@@ -10,18 +10,18 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/tesserix/auth-bff/internal/config"
-	"github.com/tesserix/go-shared/logger"
 	"github.com/tesserix/auth-bff/internal/middleware"
 	"github.com/tesserix/auth-bff/internal/oidc"
 	"github.com/tesserix/auth-bff/internal/session"
+	"github.com/tesserix/go-shared/logger"
 )
 
 // AuthHandler handles OIDC authentication flows.
 type AuthHandler struct {
-	cfg          *config.Config
-	store        session.Store
-	oidcManager  *oidc.Manager
-	logger       *logger.Logger
+	cfg         *config.Config
+	store       session.Store
+	oidcManager *oidc.Manager
+	logger      *logger.Logger
 }
 
 // NewAuthHandler creates a new AuthHandler.
@@ -79,7 +79,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	// Extract tenant slug from hostname if not provided
 	if tenantSlug == "" {
-		tenantSlug = extractTenantSlug(middleware.GetEffectiveHost(c), h.cfg.BaseDomain)
+		tenantSlug = extractTenantSlug(middleware.GetEffectiveHost(c), app)
 	}
 
 	// prompt=create → kc_action=register
@@ -222,7 +222,7 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 
 	// Set session cookie
 	host := middleware.GetEffectiveHost(c)
-	domain := middleware.GetCookieDomain(host, h.cfg.BaseDomain, h.cfg.HomeDomain)
+	domain := middleware.GetCookieDomain(host, app, h.cfg.PlatformDomain)
 	secure := !h.cfg.IsDevelopment()
 	maxAge := int(h.cfg.SessionMaxAge.Seconds())
 
@@ -268,13 +268,13 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	// Clear session cookie
 	if app != nil {
 		host := middleware.GetEffectiveHost(c)
-		domain := middleware.GetCookieDomain(host, h.cfg.BaseDomain, h.cfg.HomeDomain)
+		domain := middleware.GetCookieDomain(host, app, h.cfg.PlatformDomain)
 		c.SetSameSite(http.SameSiteLaxMode)
 		c.SetCookie(app.SessionCookie, "", -1, "/", domain, !h.cfg.IsDevelopment(), true)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success":   true,
+		"success":    true,
 		"logged_out": true,
 	})
 }
@@ -290,7 +290,7 @@ func (h *AuthHandler) LogoutRedirect(c *gin.Context) {
 
 	if app != nil {
 		host := middleware.GetEffectiveHost(c)
-		domain := middleware.GetCookieDomain(host, h.cfg.BaseDomain, h.cfg.HomeDomain)
+		domain := middleware.GetCookieDomain(host, app, h.cfg.PlatformDomain)
 		c.SetSameSite(http.SameSiteLaxMode)
 		c.SetCookie(app.SessionCookie, "", -1, "/", domain, !h.cfg.IsDevelopment(), true)
 	}
@@ -378,7 +378,7 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		_ = h.store.DeleteSession(c.Request.Context(), sess.ID)
 		if app != nil {
 			host := middleware.GetEffectiveHost(c)
-			domain := middleware.GetCookieDomain(host, h.cfg.BaseDomain, h.cfg.HomeDomain)
+			domain := middleware.GetCookieDomain(host, app, h.cfg.PlatformDomain)
 			c.SetSameSite(http.SameSiteLaxMode)
 			c.SetCookie(app.SessionCookie, "", -1, "/", domain, !h.cfg.IsDevelopment(), true)
 		}
@@ -517,8 +517,14 @@ func sanitizeReturnTo(returnTo string, app *config.AppConfig) string {
 	return returnTo
 }
 
-func extractTenantSlug(host, baseDomain string) string {
+func extractTenantSlug(host string, app *config.AppConfig) string {
 	host = strings.ToLower(host)
+
+	if app == nil || app.ProductDomain == "" {
+		return ""
+	}
+	baseDomain := app.ProductDomain
+
 	// Pattern: {slug}-admin.{baseDomain} → slug
 	suffix := "-admin." + baseDomain
 	if strings.HasSuffix(host, suffix) {
@@ -529,7 +535,7 @@ func extractTenantSlug(host, baseDomain string) string {
 	if strings.HasSuffix(host, suffix) {
 		slug := strings.TrimSuffix(host, suffix)
 		// Exclude known subdomains
-		known := map[string]bool{"www": true, "api": true, "auth": true, "onboarding": true, "company": true}
+		known := map[string]bool{"www": true, "api": true, "auth": true, "onboarding": true, "dev": true}
 		if !known[slug] && !strings.Contains(slug, "-admin") && !strings.Contains(slug, "-onboarding") {
 			return slug
 		}
@@ -553,14 +559,14 @@ func buildUserInfo(claims map[string]interface{}) *session.UserInfo {
 	}
 
 	info := &session.UserInfo{
-		Sub:               getStringClaim(claims, "sub"),
-		Email:             getStringClaim(claims, "email"),
-		Name:              getStringClaim(claims, "name"),
-		GivenName:         getStringClaim(claims, "given_name"),
-		FamilyName:        getStringClaim(claims, "family_name"),
-		PreferredUsername:  getStringClaim(claims, "preferred_username"),
-		TenantID:          getStringClaim(claims, "tenant_id"),
-		TenantSlug:        getStringClaim(claims, "tenant_slug"),
+		Sub:              getStringClaim(claims, "sub"),
+		Email:            getStringClaim(claims, "email"),
+		Name:             getStringClaim(claims, "name"),
+		GivenName:        getStringClaim(claims, "given_name"),
+		FamilyName:       getStringClaim(claims, "family_name"),
+		PreferredUsername: getStringClaim(claims, "preferred_username"),
+		TenantID:         getStringClaim(claims, "tenant_id"),
+		TenantSlug:       getStringClaim(claims, "tenant_slug"),
 	}
 
 	if v, ok := claims["email_verified"].(bool); ok {

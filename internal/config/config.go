@@ -18,17 +18,13 @@ type Config struct {
 	RedisURL      string
 	RedisPassword string
 
-	// Keycloak
-	KeycloakURL                  string
-	KeycloakInternalURL          string // Optional: internal URL for server-to-server calls (bypass CDN)
-	CustomerKeycloakURL          string // Optional: separate public URL for customer realm
-	CustomerKeycloakInternalURL  string // Optional: separate internal URL for customer realm
-	InternalRealm                string
-	CustomerRealm                string
-	InternalClientID             string
-	InternalClientSecret         string
-	CustomerClientID             string
-	CustomerClientSecret         string
+	// Keycloak base URLs (shared across all realms)
+	KeycloakURL                string
+	KeycloakInternalURL        string // Optional: internal URL for server-to-server calls (bypass CDN)
+	CustomerKeycloakURL        string // Optional: separate public URL for customer realm
+	CustomerKeycloakInternalURL string // Optional: separate internal URL for customer realm
+	InternalRealm              string // Realm name for internal/staff apps
+	CustomerRealm              string // Realm name for customer-facing apps
 
 	// Session
 	SessionSecret string
@@ -38,13 +34,13 @@ type Config struct {
 	CSRFSecret string
 
 	// Encryption
-	EncryptionKey          string // AES key for TOTP secrets (hex)
-	BackupCodeHMACKey      string
+	EncryptionKey           string // AES key for TOTP secrets (hex)
+	BackupCodeHMACKey       string
 	TOTPKeyDerivationSecret string
 
-	// Domains
-	BaseDomain string
-	HomeDomain string
+	// Products config
+	ProductsConfigPath string // Path to products.yaml (default: "products.yaml")
+	PlatformDomain     string // From products.yaml — used for WebAuthn RP ID and cross-product cookies
 
 	// WebAuthn
 	WebAuthnRPID   string
@@ -68,26 +64,29 @@ type Config struct {
 	// Rate limiting
 	RateLimitRPM int
 
-	// App configurations (populated from above)
+	// App configurations (populated from products.yaml)
 	Apps []AppConfig
 }
 
 // AppConfig defines per-application configuration.
+// Loaded from products.yaml — one entry per app across all products.
 type AppConfig struct {
-	Name           string   `json:"name"`
-	Hosts          []string `json:"hosts"`
-	Realm          string   `json:"realm"`
-	ClientID       string   `json:"clientId"`
-	ClientSecret   string   `json:"clientSecret"`
-	SessionCookie  string   `json:"sessionCookie"`
-	CallbackPath   string   `json:"callbackPath"`
-	PostLoginURL   string   `json:"postLoginUrl"`
-	PostLogoutURL  string   `json:"postLogoutUrl"`
-	AllowedOrigins []string `json:"allowedOrigins"`
-	AuthContext    string   `json:"authContext"` // "staff" or "customer"
+	Name            string   `yaml:"name" json:"name"`
+	Hosts           []string `yaml:"hosts" json:"hosts"`
+	Realm           string   `yaml:"realm" json:"realm"`
+	ClientID        string   `yaml:"clientId" json:"clientId"`
+	ClientSecret    string   `yaml:"-" json:"-"`
+	ClientSecretEnv string   `yaml:"clientSecretEnv" json:"-"`
+	SessionCookie   string   `yaml:"sessionCookie" json:"sessionCookie"`
+	CallbackPath    string   `yaml:"callbackPath" json:"callbackPath"`
+	PostLoginURL    string   `yaml:"postLoginUrl" json:"postLoginUrl"`
+	PostLogoutURL   string   `yaml:"postLogoutUrl" json:"postLogoutUrl"`
+	AllowedOrigins  []string `yaml:"allowedOrigins" json:"allowedOrigins"`
+	AuthContext     string   `yaml:"authContext" json:"authContext"` // "staff" or "customer"
+	ProductDomain   string   `yaml:"-" json:"-"`                    // Set from parent product
 }
 
-// Load reads configuration from environment variables.
+// Load reads configuration from environment variables and products.yaml.
 func Load() (*Config, error) {
 	cfg := &Config{
 		Port:        getEnv("PORT", "8080"),
@@ -97,28 +96,23 @@ func Load() (*Config, error) {
 		RedisURL:      getEnv("REDIS_URL", "redis://localhost:6379"),
 		RedisPassword: os.Getenv("REDIS_PASSWORD"),
 
-		KeycloakURL:                  getEnv("KEYCLOAK_URL", "https://auth.tesserix.app"),
-		KeycloakInternalURL:          getEnv("KEYCLOAK_INTERNAL_URL", ""),
-		CustomerKeycloakURL:          getEnv("CUSTOMER_KEYCLOAK_URL", ""),
-		CustomerKeycloakInternalURL:  getEnv("CUSTOMER_KEYCLOAK_INTERNAL_URL", ""),
-		InternalRealm:                getEnv("INTERNAL_REALM", "internal"),
-		CustomerRealm:        getEnv("CUSTOMER_REALM", "customers"),
-		InternalClientID:     getEnv("INTERNAL_CLIENT_ID", "admin-bff"),
-		InternalClientSecret: os.Getenv("INTERNAL_CLIENT_SECRET"),
-		CustomerClientID:     getEnv("CUSTOMER_CLIENT_ID", "storefront-bff"),
-		CustomerClientSecret: os.Getenv("CUSTOMER_CLIENT_SECRET"),
+		KeycloakURL:                 getEnv("KEYCLOAK_URL", "https://auth.tesserix.app"),
+		KeycloakInternalURL:         getEnv("KEYCLOAK_INTERNAL_URL", ""),
+		CustomerKeycloakURL:         getEnv("CUSTOMER_KEYCLOAK_URL", ""),
+		CustomerKeycloakInternalURL: getEnv("CUSTOMER_KEYCLOAK_INTERNAL_URL", ""),
+		InternalRealm:               getEnv("INTERNAL_REALM", "internal"),
+		CustomerRealm:               getEnv("CUSTOMER_REALM", "customers"),
 
 		SessionSecret: os.Getenv("SESSION_SECRET"),
 		SessionMaxAge: getEnvAsDuration("SESSION_MAX_AGE", 24*time.Hour),
 
 		CSRFSecret: os.Getenv("CSRF_SECRET"),
 
-		EncryptionKey:          os.Getenv("ENCRYPTION_KEY"),
-		BackupCodeHMACKey:      os.Getenv("BACKUP_CODE_HMAC_KEY"),
+		EncryptionKey:           os.Getenv("ENCRYPTION_KEY"),
+		BackupCodeHMACKey:       os.Getenv("BACKUP_CODE_HMAC_KEY"),
 		TOTPKeyDerivationSecret: os.Getenv("TOTP_KEY_DERIVATION_SECRET"),
 
-		BaseDomain: getEnv("BASE_DOMAIN", "tesserix.app"),
-		HomeDomain: getEnv("HOME_DOMAIN", "tesserix.app"),
+		ProductsConfigPath: getEnv("PRODUCTS_CONFIG_PATH", "products.yaml"),
 
 		WebAuthnRPID:   getEnv("WEBAUTHN_RP_ID", "tesserix.app"),
 		WebAuthnRPName: getEnv("WEBAUTHN_RP_NAME", "Tesserix"),
@@ -137,7 +131,9 @@ func Load() (*Config, error) {
 		RateLimitRPM: getEnvAsInt("RATE_LIMIT_RPM", 300),
 	}
 
-	cfg.Apps = cfg.buildAppConfigs()
+	if err := cfg.LoadProducts(); err != nil {
+		return nil, err
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -146,135 +142,14 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// buildAppConfigs constructs per-app configurations from the top-level config.
-func (c *Config) buildAppConfigs() []AppConfig {
-	return []AppConfig{
-		{
-			Name:          "admin",
-			Hosts:         c.adminHosts(),
-			Realm:         c.InternalRealm,
-			ClientID:      c.InternalClientID,
-			ClientSecret:  c.InternalClientSecret,
-			SessionCookie: "bff_session",
-			CallbackPath:  "/auth/callback",
-			PostLoginURL:  "/",
-			PostLogoutURL: "/login",
-			AllowedOrigins: c.adminOrigins(),
-			AuthContext:   "staff",
-		},
-		{
-			Name:          "storefront",
-			Hosts:         c.storefrontHosts(),
-			Realm:         c.CustomerRealm,
-			ClientID:      c.CustomerClientID,
-			ClientSecret:  c.CustomerClientSecret,
-			SessionCookie: "bff_storefront_session",
-			CallbackPath:  "/auth/callback",
-			PostLoginURL:  "/",
-			PostLogoutURL: "/",
-			AllowedOrigins: c.storefrontOrigins(),
-			AuthContext:   "customer",
-		},
-		{
-			Name:          "home",
-			Hosts:         c.homeHosts(),
-			Realm:         c.InternalRealm,
-			ClientID:      c.InternalClientID,
-			ClientSecret:  c.InternalClientSecret,
-			SessionCookie: "bff_home_session",
-			CallbackPath:  "/auth/callback",
-			PostLoginURL:  "/",
-			PostLogoutURL: "/login",
-			AllowedOrigins: c.homeOrigins(),
-			AuthContext:   "staff",
-		},
-		{
-			Name:          "onboarding",
-			Hosts:         c.onboardingHosts(),
-			Realm:         c.InternalRealm,
-			ClientID:      c.InternalClientID,
-			ClientSecret:  c.InternalClientSecret,
-			SessionCookie: "bff_session",
-			CallbackPath:  "/auth/callback",
-			PostLoginURL:  "/",
-			PostLogoutURL: "/login",
-			AllowedOrigins: c.onboardingOrigins(),
-			AuthContext:   "staff",
-		},
-	}
-}
-
-func (c *Config) adminHosts() []string {
-	return []string{
-		"*-admin." + c.BaseDomain,
-		"admin.localhost",
-		"localhost:3000",
-	}
-}
-
-func (c *Config) storefrontHosts() []string {
-	return []string{
-		"*." + c.BaseDomain,
-	}
-}
-
-func (c *Config) homeHosts() []string {
-	return []string{
-		c.HomeDomain,
-		"www." + c.HomeDomain,
-		"company." + c.HomeDomain,
-		"localhost:3002",
-	}
-}
-
-func (c *Config) onboardingHosts() []string {
-	return []string{
-		"onboarding." + c.BaseDomain,
-		"*-onboarding." + c.BaseDomain,
-		"localhost:3001",
-	}
-}
-
-func (c *Config) adminOrigins() []string {
-	return []string{
-		"https://*-admin." + c.BaseDomain,
-		"http://localhost:3000",
-	}
-}
-
-func (c *Config) storefrontOrigins() []string {
-	return []string{
-		"https://*." + c.BaseDomain,
-	}
-}
-
-func (c *Config) homeOrigins() []string {
-	return []string{
-		"https://" + c.HomeDomain,
-		"https://www." + c.HomeDomain,
-		"https://company." + c.HomeDomain,
-		"http://localhost:3002",
-	}
-}
-
-func (c *Config) onboardingOrigins() []string {
-	return []string{
-		"https://onboarding." + c.BaseDomain,
-		"https://*-onboarding." + c.BaseDomain,
-		"http://localhost:3001",
-	}
-}
-
 // Validate checks that required configuration values are present.
 func (c *Config) Validate() error {
 	if c.IsProduction() {
 		required := map[string]string{
-			"SESSION_SECRET":          c.SessionSecret,
-			"CSRF_SECRET":             c.CSRFSecret,
-			"INTERNAL_CLIENT_SECRET":  c.InternalClientSecret,
-			"CUSTOMER_CLIENT_SECRET":  c.CustomerClientSecret,
-			"ENCRYPTION_KEY":          c.EncryptionKey,
-			"BACKUP_CODE_HMAC_KEY":    c.BackupCodeHMACKey,
+			"SESSION_SECRET":    c.SessionSecret,
+			"CSRF_SECRET":       c.CSRFSecret,
+			"ENCRYPTION_KEY":    c.EncryptionKey,
+			"BACKUP_CODE_HMAC_KEY": c.BackupCodeHMACKey,
 		}
 		for name, val := range required {
 			if val == "" {
@@ -286,6 +161,12 @@ func (c *Config) Validate() error {
 		}
 		if len(c.CSRFSecret) < 32 {
 			return fmt.Errorf("CSRF_SECRET must be at least 32 characters")
+		}
+		// Validate that all apps have their client secrets resolved
+		for _, app := range c.Apps {
+			if app.ClientSecret == "" {
+				return fmt.Errorf("client secret for app %q (env: %s) is not set", app.Name, app.ClientSecretEnv)
+			}
 		}
 	}
 	return nil

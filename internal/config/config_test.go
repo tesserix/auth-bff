@@ -2,14 +2,100 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
+func writeTestProductsYAML(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "products.yaml")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write test products.yaml: %v", err)
+	}
+	return path
+}
+
+const testProductsYAML = `
+platformDomain: tesserix.app
+products:
+  - name: tesserix
+    domain: tesserix.app
+    apps:
+      - name: home
+        hosts:
+          - "tesserix.app"
+          - "www.tesserix.app"
+          - "dev.tesserix.app"
+          - "localhost:3002"
+        realm: internal
+        clientId: platform
+        clientSecretEnv: PLATFORM_CLIENT_SECRET
+        sessionCookie: bff_home_session
+        callbackPath: /auth/callback
+        postLoginUrl: /admin/dashboard
+        postLogoutUrl: /login
+        authContext: staff
+        allowedOrigins:
+          - "https://tesserix.app"
+          - "https://www.tesserix.app"
+          - "https://dev.tesserix.app"
+          - "http://localhost:3002"
+`
+
+func TestLoad_WithProducts(t *testing.T) {
+	path := writeTestProductsYAML(t, testProductsYAML)
+	t.Setenv("PRODUCTS_CONFIG_PATH", path)
+	t.Setenv("PLATFORM_CLIENT_SECRET", "test-secret")
+
+	for _, k := range []string{"PORT", "APP_ENV", "REDIS_URL", "KEYCLOAK_URL"} {
+		os.Unsetenv(k)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.PlatformDomain != "tesserix.app" {
+		t.Errorf("PlatformDomain = %q, want tesserix.app", cfg.PlatformDomain)
+	}
+
+	if len(cfg.Apps) != 1 {
+		t.Fatalf("got %d apps, want 1", len(cfg.Apps))
+	}
+
+	app := cfg.Apps[0]
+	if app.Name != "home" {
+		t.Errorf("app name = %q, want home", app.Name)
+	}
+	if app.ClientID != "platform" {
+		t.Errorf("clientId = %q, want platform", app.ClientID)
+	}
+	if app.ClientSecret != "test-secret" {
+		t.Errorf("clientSecret not resolved from env")
+	}
+	if app.ProductDomain != "tesserix.app" {
+		t.Errorf("ProductDomain = %q, want tesserix.app", app.ProductDomain)
+	}
+	if app.SessionCookie != "bff_home_session" {
+		t.Errorf("sessionCookie = %q, want bff_home_session", app.SessionCookie)
+	}
+	if app.PostLoginURL != "/admin/dashboard" {
+		t.Errorf("postLoginUrl = %q, want /admin/dashboard", app.PostLoginURL)
+	}
+	if len(app.Hosts) != 4 {
+		t.Errorf("hosts count = %d, want 4", len(app.Hosts))
+	}
+}
+
 func TestLoad_Defaults(t *testing.T) {
-	// Clear any env vars that might interfere
-	envKeys := []string{"PORT", "APP_ENV", "REDIS_URL", "KEYCLOAK_URL", "SESSION_SECRET", "CSRF_SECRET"}
-	for _, k := range envKeys {
+	path := writeTestProductsYAML(t, testProductsYAML)
+	t.Setenv("PRODUCTS_CONFIG_PATH", path)
+	t.Setenv("PLATFORM_CLIENT_SECRET", "test-secret")
+
+	for _, k := range []string{"PORT", "APP_ENV", "REDIS_URL", "KEYCLOAK_URL"} {
 		os.Unsetenv(k)
 	}
 
@@ -30,8 +116,7 @@ func TestLoad_Defaults(t *testing.T) {
 		{"keycloak_url", cfg.KeycloakURL, "https://auth.tesserix.app"},
 		{"internal_realm", cfg.InternalRealm, "internal"},
 		{"customer_realm", cfg.CustomerRealm, "customers"},
-		{"base_domain", cfg.BaseDomain, "tesserix.app"},
-		{"home_domain", cfg.HomeDomain, "tesserix.app"},
+		{"platform_domain", cfg.PlatformDomain, "tesserix.app"},
 	}
 
 	for _, tt := range tests {
@@ -43,28 +128,52 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 }
 
-func TestLoad_EnvOverride(t *testing.T) {
-	t.Setenv("PORT", "9090")
-	t.Setenv("APP_ENV", "staging")
-	t.Setenv("REDIS_URL", "redis://custom:6380")
-	t.Setenv("BASE_DOMAIN", "mark8ly.com")
+func TestLoad_MissingProductsFile(t *testing.T) {
+	t.Setenv("PRODUCTS_CONFIG_PATH", "/nonexistent/products.yaml")
 
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error: %v", err)
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for missing products file")
 	}
+}
 
-	if cfg.Port != "9090" {
-		t.Errorf("Port = %q, want 9090", cfg.Port)
+func TestLoad_NoApps(t *testing.T) {
+	yaml := `
+platformDomain: tesserix.app
+products: []
+`
+	path := writeTestProductsYAML(t, yaml)
+	t.Setenv("PRODUCTS_CONFIG_PATH", path)
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for no apps")
 	}
-	if cfg.Environment != "staging" {
-		t.Errorf("Environment = %q, want staging", cfg.Environment)
-	}
-	if cfg.RedisURL != "redis://custom:6380" {
-		t.Errorf("RedisURL = %q, want redis://custom:6380", cfg.RedisURL)
-	}
-	if cfg.BaseDomain != "mark8ly.com" {
-		t.Errorf("BaseDomain = %q, want mark8ly.com", cfg.BaseDomain)
+}
+
+func TestLoad_MissingPlatformDomain(t *testing.T) {
+	yaml := `
+products:
+  - name: test
+    domain: test.com
+    apps:
+      - name: app1
+        hosts: ["localhost"]
+        realm: internal
+        clientId: test
+        clientSecretEnv: TEST_SECRET
+        sessionCookie: test_session
+        callbackPath: /callback
+        postLoginUrl: /
+        postLogoutUrl: /login
+        authContext: staff
+`
+	path := writeTestProductsYAML(t, yaml)
+	t.Setenv("PRODUCTS_CONFIG_PATH", path)
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for missing platformDomain")
 	}
 }
 
@@ -88,10 +197,9 @@ func TestValidate_Production(t *testing.T) {
 				c.Environment = "production"
 				c.SessionSecret = "short"
 				c.CSRFSecret = "a]3HQkw@&C!z9yV^BkW#nX2$pL8rJ5mA"
-				c.InternalClientSecret = "secret"
-				c.CustomerClientSecret = "secret"
 				c.EncryptionKey = "key"
 				c.BackupCodeHMACKey = "key"
+				c.Apps = []AppConfig{{Name: "home", ClientSecret: "sec", ClientSecretEnv: "X"}}
 			},
 			wantErr: true,
 		},
@@ -101,12 +209,23 @@ func TestValidate_Production(t *testing.T) {
 				c.Environment = "production"
 				c.SessionSecret = "a]3HQkw@&C!z9yV^BkW#nX2$pL8rJ5mA"
 				c.CSRFSecret = "b]3HQkw@&C!z9yV^BkW#nX2$pL8rJ5mB"
-				c.InternalClientSecret = "secret"
-				c.CustomerClientSecret = "secret"
 				c.EncryptionKey = "key"
 				c.BackupCodeHMACKey = "key"
+				c.Apps = []AppConfig{{Name: "home", ClientSecret: "sec", ClientSecretEnv: "X"}}
 			},
 			wantErr: false,
+		},
+		{
+			name: "missing app client secret in production",
+			setup: func(c *Config) {
+				c.Environment = "production"
+				c.SessionSecret = "a]3HQkw@&C!z9yV^BkW#nX2$pL8rJ5mA"
+				c.CSRFSecret = "b]3HQkw@&C!z9yV^BkW#nX2$pL8rJ5mB"
+				c.EncryptionKey = "key"
+				c.BackupCodeHMACKey = "key"
+				c.Apps = []AppConfig{{Name: "home", ClientSecret: "", ClientSecretEnv: "MISSING_ENV"}}
+			},
+			wantErr: true,
 		},
 		{
 			name: "development allows empty secrets",
@@ -160,66 +279,6 @@ func TestIsDevelopment(t *testing.T) {
 		if got := cfg.IsDevelopment(); got != tt.want {
 			t.Errorf("IsDevelopment(%q) = %v, want %v", tt.env, got, tt.want)
 		}
-	}
-}
-
-func TestBuildAppConfigs(t *testing.T) {
-	cfg := &Config{
-		BaseDomain:           "tesserix.app",
-		HomeDomain:           "tesserix.app",
-		InternalRealm:        "internal",
-		CustomerRealm:        "customers",
-		InternalClientID:     "admin-bff",
-		InternalClientSecret: "sec1",
-		CustomerClientID:     "storefront-bff",
-		CustomerClientSecret: "sec2",
-	}
-	apps := cfg.buildAppConfigs()
-
-	if len(apps) != 4 {
-		t.Fatalf("got %d apps, want 4", len(apps))
-	}
-
-	names := map[string]bool{}
-	for _, app := range apps {
-		names[app.Name] = true
-	}
-
-	for _, expected := range []string{"admin", "storefront", "home", "onboarding"} {
-		if !names[expected] {
-			t.Errorf("missing app %q", expected)
-		}
-	}
-
-	// Check admin app
-	var admin AppConfig
-	for _, app := range apps {
-		if app.Name == "admin" {
-			admin = app
-		}
-	}
-	if admin.SessionCookie != "bff_session" {
-		t.Errorf("admin cookie = %q, want bff_session", admin.SessionCookie)
-	}
-	if admin.Realm != "internal" {
-		t.Errorf("admin realm = %q, want internal", admin.Realm)
-	}
-	if admin.AuthContext != "staff" {
-		t.Errorf("admin auth_context = %q, want staff", admin.AuthContext)
-	}
-
-	// Check storefront app
-	var storefront AppConfig
-	for _, app := range apps {
-		if app.Name == "storefront" {
-			storefront = app
-		}
-	}
-	if storefront.SessionCookie != "bff_storefront_session" {
-		t.Errorf("storefront cookie = %q, want bff_storefront_session", storefront.SessionCookie)
-	}
-	if storefront.AuthContext != "customer" {
-		t.Errorf("storefront auth_context = %q, want customer", storefront.AuthContext)
 	}
 }
 

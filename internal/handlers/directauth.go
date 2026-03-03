@@ -268,7 +268,7 @@ createSession:
 	// Set session cookie
 	if app != nil {
 		host := middleware.GetEffectiveHost(c)
-		domain := middleware.GetCookieDomain(host, h.cfg.BaseDomain, h.cfg.HomeDomain)
+		domain := middleware.GetCookieDomain(host, app, h.cfg.PlatformDomain)
 		secure := !h.cfg.IsDevelopment()
 		maxAge := int(h.cfg.SessionMaxAge.Seconds())
 		if rememberMe {
@@ -388,7 +388,7 @@ func (h *DirectAuthHandler) VerifyMFA(c *gin.Context) {
 	// Set session cookie
 	if app != nil {
 		host := middleware.GetEffectiveHost(c)
-		domain := middleware.GetCookieDomain(host, h.cfg.BaseDomain, h.cfg.HomeDomain)
+		domain := middleware.GetCookieDomain(host, app, h.cfg.PlatformDomain)
 		secure := !h.cfg.IsDevelopment()
 		maxAge := int(h.cfg.SessionMaxAge.Seconds())
 		c.SetSameSite(http.SameSiteLaxMode)
@@ -400,7 +400,7 @@ func (h *DirectAuthHandler) VerifyMFA(c *gin.Context) {
 		trustHash := uuid.New().String()
 		_ = h.store.SaveDeviceTrust(c.Request.Context(), trustHash, mfaSess.UserID)
 		host := middleware.GetEffectiveHost(c)
-		domain := middleware.GetCookieDomain(host, h.cfg.BaseDomain, h.cfg.HomeDomain)
+		domain := middleware.GetCookieDomain(host, app, h.cfg.PlatformDomain)
 		secure := !h.cfg.IsDevelopment()
 		c.SetSameSite(http.SameSiteLaxMode)
 		c.SetCookie("device_trust", trustHash, int(session.TTLDeviceTrust.Seconds()), "/", domain, secure, true)
@@ -505,7 +505,7 @@ func (h *DirectAuthHandler) Register(c *gin.Context) {
 
 		if app != nil {
 			host := middleware.GetEffectiveHost(c)
-			domain := middleware.GetCookieDomain(host, h.cfg.BaseDomain, h.cfg.HomeDomain)
+			domain := middleware.GetCookieDomain(host, app, h.cfg.PlatformDomain)
 			secure := !h.cfg.IsDevelopment()
 			maxAge := int(h.cfg.SessionMaxAge.Seconds())
 			c.SetSameSite(http.SameSiteLaxMode)
