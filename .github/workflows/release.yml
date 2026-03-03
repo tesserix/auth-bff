@@ -297,6 +297,8 @@ jobs:
             --max-instances=20 \
             --no-allow-unauthenticated \
             --ingress=internal-and-cloud-load-balancing \
+            --vpc-connector=projects/${{ env.GCP_PROJECT_ID }}/locations/asia-south1/connectors/gl-prod-vpc-connector \
+            --vpc-egress=private-ranges-only \
             --set-env-vars="\
           APP_ENV=production,\
           KEYCLOAK_URL=https://auth.tesserix.app,\
