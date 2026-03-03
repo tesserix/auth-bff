@@ -304,10 +304,12 @@ jobs:
           APP_ENV=production,\
           KEYCLOAK_URL=https://auth.tesserix.app,\
           KEYCLOAK_INTERNAL_URL=https://internal-idp.mark8ly.com,\
-          INTERNAL_REALM=internal,\
-          CUSTOMER_REALM=customers,\
-          INTERNAL_CLIENT_ID=admin-bff,\
-          CUSTOMER_CLIENT_ID=storefront-bff,\
+          INTERNAL_REALM=tesserix-internal,\
+          CUSTOMER_REALM=tesserix-customer,\
+          CUSTOMER_KEYCLOAK_URL=https://customer-idp.mark8ly.com,\
+          CUSTOMER_KEYCLOAK_INTERNAL_URL=https://customer-idp.mark8ly.com,\
+          INTERNAL_CLIENT_ID=marketplace-dashboard,\
+          CUSTOMER_CLIENT_ID=storefront-web,\
           BASE_DOMAIN=mark8ly.com,\
           HOME_DOMAIN=tesserix.app,\
           WEBAUTHN_RP_ID=tesserix.app,\
