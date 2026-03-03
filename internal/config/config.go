@@ -19,14 +19,16 @@ type Config struct {
 	RedisPassword string
 
 	// Keycloak
-	KeycloakURL          string
-	KeycloakInternalURL  string // Optional: internal URL for server-to-server calls (bypass CDN)
-	InternalRealm        string
-	CustomerRealm        string
-	InternalClientID     string
-	InternalClientSecret string
-	CustomerClientID     string
-	CustomerClientSecret string
+	KeycloakURL                  string
+	KeycloakInternalURL          string // Optional: internal URL for server-to-server calls (bypass CDN)
+	CustomerKeycloakURL          string // Optional: separate public URL for customer realm
+	CustomerKeycloakInternalURL  string // Optional: separate internal URL for customer realm
+	InternalRealm                string
+	CustomerRealm                string
+	InternalClientID             string
+	InternalClientSecret         string
+	CustomerClientID             string
+	CustomerClientSecret         string
 
 	// Session
 	SessionSecret string
@@ -95,9 +97,11 @@ func Load() (*Config, error) {
 		RedisURL:      getEnv("REDIS_URL", "redis://localhost:6379"),
 		RedisPassword: os.Getenv("REDIS_PASSWORD"),
 
-		KeycloakURL:          getEnv("KEYCLOAK_URL", "https://auth.tesserix.app"),
-		KeycloakInternalURL:  getEnv("KEYCLOAK_INTERNAL_URL", ""),
-		InternalRealm:        getEnv("INTERNAL_REALM", "internal"),
+		KeycloakURL:                  getEnv("KEYCLOAK_URL", "https://auth.tesserix.app"),
+		KeycloakInternalURL:          getEnv("KEYCLOAK_INTERNAL_URL", ""),
+		CustomerKeycloakURL:          getEnv("CUSTOMER_KEYCLOAK_URL", ""),
+		CustomerKeycloakInternalURL:  getEnv("CUSTOMER_KEYCLOAK_INTERNAL_URL", ""),
+		InternalRealm:                getEnv("INTERNAL_REALM", "internal"),
 		CustomerRealm:        getEnv("CUSTOMER_REALM", "customers"),
 		InternalClientID:     getEnv("INTERNAL_CLIENT_ID", "admin-bff"),
 		InternalClientSecret: os.Getenv("INTERNAL_CLIENT_SECRET"),
@@ -285,6 +289,24 @@ func (c *Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+// CustomerKeycloakPublicURL returns the public Keycloak URL for the customer realm.
+// Falls back to the shared KeycloakURL if not set.
+func (c *Config) CustomerKeycloakPublicURL() string {
+	if c.CustomerKeycloakURL != "" {
+		return c.CustomerKeycloakURL
+	}
+	return c.KeycloakURL
+}
+
+// CustomerKeycloakDiscoveryURL returns the internal Keycloak URL for the customer realm.
+// Falls back to the shared KeycloakInternalURL if not set.
+func (c *Config) CustomerKeycloakDiscoveryURL() string {
+	if c.CustomerKeycloakInternalURL != "" {
+		return c.CustomerKeycloakInternalURL
+	}
+	return c.KeycloakInternalURL
 }
 
 // IsProduction returns true if running in production.

@@ -38,11 +38,12 @@ func NewManager(ctx context.Context, cfg *config.Config) (*Manager, error) {
 	}
 	m.providers[cfg.InternalRealm] = internalProvider
 
-	// Customer realm (storefront)
-	customerIssuer := fmt.Sprintf("%s/realms/%s", cfg.KeycloakURL, cfg.CustomerRealm)
+	// Customer realm (storefront) — supports separate Keycloak instance
+	customerBaseURL := cfg.CustomerKeycloakPublicURL()
+	customerIssuer := fmt.Sprintf("%s/realms/%s", customerBaseURL, cfg.CustomerRealm)
 	customerInternal := ""
-	if cfg.KeycloakInternalURL != "" {
-		customerInternal = fmt.Sprintf("%s/realms/%s", cfg.KeycloakInternalURL, cfg.CustomerRealm)
+	if url := cfg.CustomerKeycloakDiscoveryURL(); url != "" {
+		customerInternal = fmt.Sprintf("%s/realms/%s", url, cfg.CustomerRealm)
 	}
 
 	customerProvider, err := NewKeycloakProvider(ctx, ProviderConfig{

@@ -312,7 +312,7 @@ jobs:
           HOME_DOMAIN=tesserix.app,\
           WEBAUTHN_RP_ID=tesserix.app,\
           WEBAUTHN_RP_NAME=Tesserix,\
-          REDIS_URL=redis://10.10.15.220:6379,\
+          REDIS_URL=redis://10.10.0.39:6379,\
           RATE_LIMIT_RPM=300,\
           API_GATEWAY_URL=http://34.93.146.250:80" \
             --set-secrets="\
