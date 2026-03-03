@@ -297,7 +297,31 @@ jobs:
             --max-instances=20 \
             --no-allow-unauthenticated \
             --ingress=internal-and-cloud-load-balancing \
-            --set-env-vars="APP_ENV=production" \
+            --set-env-vars="\
+          APP_ENV=production,\
+          KEYCLOAK_URL=https://auth.tesserix.app,\
+          KEYCLOAK_INTERNAL_URL=https://internal-idp.mark8ly.com,\
+          INTERNAL_REALM=internal,\
+          CUSTOMER_REALM=customers,\
+          INTERNAL_CLIENT_ID=admin-bff,\
+          CUSTOMER_CLIENT_ID=storefront-bff,\
+          BASE_DOMAIN=mark8ly.com,\
+          HOME_DOMAIN=tesserix.app,\
+          WEBAUTHN_RP_ID=tesserix.app,\
+          WEBAUTHN_RP_NAME=Tesserix,\
+          REDIS_URL=redis://10.10.15.220:6379,\
+          RATE_LIMIT_RPM=300,\
+          API_GATEWAY_URL=http://34.93.146.250:80" \
+            --set-secrets="\
+          INTERNAL_CLIENT_SECRET=prod-keycloak-admin-bff-client-secret:latest,\
+          CUSTOMER_CLIENT_SECRET=prod-keycloak-customer-dashboard-client-secret:latest,\
+          SESSION_SECRET=prod-encryption-key:latest,\
+          CSRF_SECRET=prod-jwt-secret:latest,\
+          ENCRYPTION_KEY=prod-encryption-key:latest,\
+          BACKUP_CODE_HMAC_KEY=prod-auth-bff-backup-code-hmac-key:latest,\
+          TOTP_KEY_DERIVATION_SECRET=prod-totp-encryption-key:latest,\
+          REDIS_PASSWORD=prod-marketplace-redis-password:latest,\
+          INTERNAL_SERVICE_KEY=prod-internal-service-key:latest" \
             --quiet
 
       - name: Deploy Summary
