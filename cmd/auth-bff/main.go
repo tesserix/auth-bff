@@ -54,14 +54,28 @@ func main() {
 		appLogger.Error("parse redis url", "error", err)
 		os.Exit(1)
 	}
+	if cfg.RedisPassword != "" {
+		redisOpts.Password = cfg.RedisPassword
+	}
 	redisClient := redis.NewClient(redisOpts)
 	defer redisClient.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := redisClient.Ping(ctx).Err(); err != nil {
-		appLogger.Error("redis connection failed", "error", err)
-		os.Exit(1)
+	// Retry Redis connection (handles Cloud Run cold starts where VPC connector takes time)
+	const maxRetries = 5
+	for i := 0; i < maxRetries; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := redisClient.Ping(ctx).Err(); err != nil {
+			cancel()
+			if i < maxRetries-1 {
+				appLogger.Warn("redis connection failed, retrying...", "attempt", i+1, "error", err)
+				time.Sleep(time.Duration(i+1) * 2 * time.Second)
+				continue
+			}
+			appLogger.Error("redis connection failed after retries", "error", err)
+			os.Exit(1)
+		}
+		cancel()
+		break
 	}
 	appLogger.Info("redis connected")
 

@@ -15,7 +15,8 @@ type Config struct {
 	ServiceName string
 
 	// Redis
-	RedisURL string
+	RedisURL      string
+	RedisPassword string
 
 	// Keycloak
 	KeycloakURL          string
@@ -91,7 +92,8 @@ func Load() (*Config, error) {
 		Environment: getEnv("APP_ENV", "development"),
 		ServiceName: "auth-bff",
 
-		RedisURL: getEnv("REDIS_URL", "redis://localhost:6379"),
+		RedisURL:      getEnv("REDIS_URL", "redis://localhost:6379"),
+		RedisPassword: os.Getenv("REDIS_PASSWORD"),
 
 		KeycloakURL:          getEnv("KEYCLOAK_URL", "https://auth.tesserix.app"),
 		KeycloakInternalURL:  getEnv("KEYCLOAK_INTERNAL_URL", ""),
