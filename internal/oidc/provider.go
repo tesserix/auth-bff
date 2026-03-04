@@ -23,7 +23,7 @@ type TokenSet struct {
 // Provider wraps OIDC discovery and token operations for a single realm.
 type Provider interface {
 	AuthURL(state, nonce, codeVerifier string, extraParams map[string]string) string
-	Exchange(ctx context.Context, code, codeVerifier string) (*TokenSet, error)
+	Exchange(ctx context.Context, code, codeVerifier, redirectURI string) (*TokenSet, error)
 	Refresh(ctx context.Context, refreshToken string) (*TokenSet, error)
 	UserInfo(ctx context.Context, accessToken string) (map[string]interface{}, error)
 	PasswordGrant(ctx context.Context, username, password string) (*TokenSet, error)
@@ -113,9 +113,12 @@ func (p *KeycloakProvider) AuthURL(state, nonce, codeVerifier string, extraParam
 }
 
 // Exchange exchanges an authorization code for tokens using PKCE.
-func (p *KeycloakProvider) Exchange(ctx context.Context, code, codeVerifier string) (*TokenSet, error) {
+func (p *KeycloakProvider) Exchange(ctx context.Context, code, codeVerifier, redirectURI string) (*TokenSet, error) {
 	opts := []oauth2.AuthCodeOption{
 		oauth2.SetAuthURLParam("code_verifier", codeVerifier),
+	}
+	if redirectURI != "" {
+		opts = append(opts, oauth2.SetAuthURLParam("redirect_uri", redirectURI))
 	}
 	token, err := p.oauth2Config.Exchange(ctx, code, opts...)
 	if err != nil {

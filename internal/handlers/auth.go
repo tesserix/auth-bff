@@ -172,7 +172,7 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 	}
 
 	// Exchange code for tokens with PKCE
-	tokens, err := provider.Exchange(c.Request.Context(), code, flowState.CodeVerifier)
+	tokens, err := provider.Exchange(c.Request.Context(), code, flowState.CodeVerifier, flowState.RedirectURI)
 	if err != nil {
 		h.logger.Error("oidc code exchange", "error", err)
 		c.Redirect(http.StatusFound, "/login?error=exchange_failed")
