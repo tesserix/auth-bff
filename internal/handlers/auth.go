@@ -45,6 +45,7 @@ func (h *AuthHandler) RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/auth/csrf-token", h.CSRFToken)
 	r.POST("/auth/ws-ticket", h.CreateWSTicket)
 	r.POST("/auth/session/transfer", h.SessionTransfer)
+	r.POST("/auth/token-exchange", h.requireInternalServiceKey(), h.TokenExchange)
 }
 
 // Login initiates the OIDC authorization flow with PKCE.
@@ -476,6 +477,51 @@ func (h *AuthHandler) SessionTransfer(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"code":    code,
+	})
+}
+
+// requireInternalServiceKey validates the X-Internal-Service-Key header
+// for service-to-service calls (e.g. Cloud Run → auth-bff via public ingress).
+func (h *AuthHandler) requireInternalServiceKey() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if h.cfg.InternalServiceKey == "" {
+			c.Next()
+			return
+		}
+		key := c.GetHeader("X-Internal-Service-Key")
+		if key != h.cfg.InternalServiceKey {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"success": false, "error": "UNAUTHORIZED"})
+			return
+		}
+		c.Next()
+	}
+}
+
+// TokenExchange exchanges a session ID for an access token.
+// This is the same as InternalHandler.ExchangeToken but exposed under /auth/
+// so it's reachable from Cloud Run via the Istio VirtualService /auth route.
+func (h *AuthHandler) TokenExchange(c *gin.Context) {
+	var req struct {
+		SessionID string `json:"sessionId" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "INVALID_REQUEST"})
+		return
+	}
+
+	sess, err := h.store.GetSession(c.Request.Context(), req.SessionID)
+	if err != nil || sess == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "SESSION_NOT_FOUND"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":      true,
+		"access_token": sess.AccessToken,
+		"user_id":      sess.UserID,
+		"tenant_id":    sess.TenantID,
+		"tenant_slug":  sess.TenantSlug,
+		"expires_at":   sess.ExpiresAt,
 	})
 }
 
