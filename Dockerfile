@@ -27,6 +27,7 @@ RUN addgroup -g 1000 appgroup && \
     adduser -u 1000 -G appgroup -D appuser
 
 COPY --from=builder /auth-bff /auth-bff
+COPY --from=builder /app/products.yaml /products.yaml
 
 USER appuser
 

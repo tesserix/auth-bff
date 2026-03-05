@@ -20,8 +20,10 @@ products:
           - "www.tesserix.app"
           - "dev.tesserix.app"
           - "localhost:3002"
-        gipTenantId: staff
-        oauthClientId: platform-web-client
+          - "auth-bff-e737nq7avq-el.a.run.app"
+          - "tesserix-home-e737nq7avq-el.a.run.app"
+        gipTenantId: ""
+        oauthClientId: "677812215720-3q9j7rjt8op266ih0l9qlc5bg0jckeer.apps.googleusercontent.com"
         clientSecretEnv: PLATFORM_CLIENT_SECRET
         sessionCookie: bff_home_session
         callbackPath: /auth/callback
@@ -33,6 +35,8 @@ products:
           - "https://www.tesserix.app"
           - "https://dev.tesserix.app"
           - "http://localhost:3002"
+          - "https://auth-bff-e737nq7avq-el.a.run.app"
+          - "https://tesserix-home-e737nq7avq-el.a.run.app"
 
   # Phase 2 — uncomment when migrating marketplace
   # - name: marketplace
