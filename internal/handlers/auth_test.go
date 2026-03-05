@@ -5,308 +5,229 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tesserix/auth-bff/internal/config"
 	"github.com/tesserix/auth-bff/internal/middleware"
 	"github.com/tesserix/auth-bff/internal/session"
-	"github.com/tesserix/go-shared/logger"
 )
 
-func testConfig() *config.Config {
+const testKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+func init() {
+	gin.SetMode(gin.TestMode)
+}
+
+func newTestConfig() *config.Config {
 	return &config.Config{
-		Environment:    "development",
-		PlatformDomain: "tesserix.app",
-		SessionMaxAge:  86400,
-		Apps: []config.AppConfig{
-			{Name: "admin", SessionCookie: "bff_session", Realm: "internal", PostLoginURL: "/", PostLogoutURL: "/login", ProductDomain: "tesserix.app"},
-			{Name: "storefront", SessionCookie: "bff_storefront_session", Realm: "customers", PostLoginURL: "/", PostLogoutURL: "/", ProductDomain: "tesserix.app"},
-			{Name: "home", SessionCookie: "bff_home_session", Realm: "internal", PostLoginURL: "/", PostLogoutURL: "/login", ProductDomain: "tesserix.app"},
-		},
+		Port:                "8080",
+		Environment:         "test",
+		CookieEncryptionKey: testKey,
+		SessionMaxAge:       24 * time.Hour,
+		PlatformDomain:      "tesserix.app",
+		CSRFSecret:          testKey,
 	}
 }
 
-func testLogger() *logger.Logger {
-	return logger.New(logger.Config{
-		Level:       logger.LevelError,
-		ServiceName: "test",
-		Format:      "text",
-	})
+func newTestApp() *config.AppConfig {
+	return &config.AppConfig{
+		Name:          "tesserix-home",
+		SessionCookie: "th_session",
+		PostLoginURL:  "/dashboard",
+		PostLogoutURL: "/",
+		CallbackPath:  "/auth/callback",
+		AuthContext:    "staff",
+	}
+}
+
+func TestAuthHandler_Session_Unauthenticated(t *testing.T) {
+	cfg := newTestConfig()
+	h := &AuthHandler{
+		cfg:      cfg,
+		sessions: session.NewCookieStore(testKey, 24*time.Hour, false),
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/auth/session", nil)
+
+	h.Session(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	var resp map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&resp)
+
+	if resp["authenticated"] != false {
+		t.Error("unauthenticated session should return authenticated=false")
+	}
 }
 
 func TestAuthHandler_Session_Authenticated(t *testing.T) {
-	store := newMockStore()
+	cfg := newTestConfig()
+	store := session.NewCookieStore(testKey, 24*time.Hour, false)
+	h := &AuthHandler{cfg: cfg, sessions: store}
+
 	sess := &session.Session{
-		ID:         "sess-1",
-		UserID:     "user-1",
-		Email:      "test@example.com",
-		TenantID:   "tenant-1",
-		TenantSlug: "demo",
-		ExpiresAt:  9999999999,
-		CSRFToken:  "csrf-123",
-		UserInfo: &session.UserInfo{
-			Name:      "Test User",
-			GivenName: "Test",
-			FamilyName: "User",
-			Roles:     []string{"admin"},
-		},
+		UserID:      "user-123",
+		Email:       "test@example.com",
+		TenantID:    "tenant-456",
+		AuthContext:  "staff",
+		CSRFToken:   "csrf-token",
+		ExpiresAt:   time.Now().Add(time.Hour).Unix(),
 	}
-	store.CreateSession(nil, sess)
 
-	cfg := testConfig()
-	handler := NewAuthHandler(cfg, store, nil, testLogger())
-
-	router := setupRouter()
-	router.Use(func(c *gin.Context) {
-		c.Set(middleware.ContextKeySession, sess)
-		c.Next()
-	})
-	group := router.Group("")
-	handler.RegisterRoutes(group)
-
-	req := httptest.NewRequest(http.MethodGet, "/auth/session", nil)
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/auth/session", nil)
+	c.Set(middleware.ContextKeySession, sess)
+
+	h.Session(c)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
+		t.Errorf("expected 200, got %d", w.Code)
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	json.NewDecoder(w.Body).Decode(&resp)
 
 	if resp["authenticated"] != true {
-		t.Errorf("authenticated = %v, want true", resp["authenticated"])
+		t.Error("should be authenticated")
 	}
-	if resp["csrfToken"] != "csrf-123" {
-		t.Errorf("csrfToken = %v, want csrf-123", resp["csrfToken"])
+	if resp["userId"] != "user-123" {
+		t.Errorf("userId = %v, want user-123", resp["userId"])
 	}
-
-	user := resp["user"].(map[string]interface{})
-	if user["id"] != "user-1" {
-		t.Errorf("user.id = %v, want user-1", user["id"])
+	if resp["email"] != "test@example.com" {
+		t.Errorf("email = %v, want test@example.com", resp["email"])
 	}
-	if user["email"] != "test@example.com" {
-		t.Errorf("user.email = %v", user["email"])
+	if resp["csrfToken"] != "csrf-token" {
+		t.Errorf("csrfToken = %v, want csrf-token", resp["csrfToken"])
 	}
-	if user["name"] != "Test User" {
-		t.Errorf("user.name = %v", user["name"])
-	}
-}
-
-func TestAuthHandler_Session_NotAuthenticated(t *testing.T) {
-	cfg := testConfig()
-	store := newMockStore()
-	handler := NewAuthHandler(cfg, store, nil, testLogger())
-
-	router := setupRouter()
-	group := router.Group("")
-	handler.RegisterRoutes(group)
-
-	req := httptest.NewRequest(http.MethodGet, "/auth/session", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-
-	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp["authenticated"] != false {
-		t.Errorf("authenticated = %v, want false", resp["authenticated"])
+	// Should NOT expose tokens
+	if _, ok := resp["accessToken"]; ok {
+		t.Error("should not expose accessToken in session response")
 	}
 }
 
-func TestAuthHandler_CSRFToken_Authenticated(t *testing.T) {
-	store := newMockStore()
-	sess := &session.Session{ID: "sess-1", CSRFToken: "csrf-abc"}
-	store.CreateSession(nil, sess)
+func TestAuthHandler_CSRFToken_NoSession(t *testing.T) {
+	h := &AuthHandler{}
 
-	cfg := testConfig()
-	handler := NewAuthHandler(cfg, store, nil, testLogger())
-
-	router := setupRouter()
-	router.Use(func(c *gin.Context) {
-		c.Set(middleware.ContextKeySession, sess)
-		c.Next()
-	})
-	group := router.Group("")
-	handler.RegisterRoutes(group)
-
-	req := httptest.NewRequest(http.MethodGet, "/auth/csrf-token", nil)
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/auth/csrf-token", nil)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-
-	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp["csrfToken"] != "csrf-abc" {
-		t.Errorf("csrfToken = %v, want csrf-abc", resp["csrfToken"])
-	}
-}
-
-func TestAuthHandler_CSRFToken_Unauthenticated(t *testing.T) {
-	cfg := testConfig()
-	store := newMockStore()
-	handler := NewAuthHandler(cfg, store, nil, testLogger())
-
-	router := setupRouter()
-	group := router.Group("")
-	handler.RegisterRoutes(group)
-
-	req := httptest.NewRequest(http.MethodGet, "/auth/csrf-token", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	h.CSRFToken(c)
 
 	if w.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", w.Code)
+		t.Errorf("expected 401, got %d", w.Code)
 	}
 }
 
-func TestSanitizeReturnTo(t *testing.T) {
-	app := &config.AppConfig{Name: "admin"}
+func TestAuthHandler_CSRFToken_WithSession(t *testing.T) {
+	h := &AuthHandler{}
 
-	tests := []struct {
-		name   string
-		input  string
-		want   string
-	}{
-		{"relative path", "/dashboard", "/dashboard"},
-		{"root", "/", "/"},
-		{"deep path", "/admin/settings/profile", "/admin/settings/profile"},
-		{"empty", "", ""},
-		{"absolute url", "https://evil.com/steal", ""},
-		{"protocol relative", "//evil.com", ""},
-		{"no leading slash", "dashboard", ""},
-		{"javascript", "javascript:alert(1)", ""},
+	sess := &session.Session{CSRFToken: "my-csrf-token"}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/auth/csrf-token", nil)
+	c.Set(middleware.ContextKeySession, sess)
+
+	h.CSRFToken(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := sanitizeReturnTo(tt.input, app)
-			if got != tt.want {
-				t.Errorf("sanitizeReturnTo(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
+	var resp map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&resp)
+
+	if resp["csrfToken"] != "my-csrf-token" {
+		t.Errorf("csrfToken = %v, want my-csrf-token", resp["csrfToken"])
 	}
 }
 
-func TestExtractTenantSlug(t *testing.T) {
-	tests := []struct {
-		host          string
-		productDomain string
-		want          string
-	}{
-		{"demo-admin.tesserix.app", "tesserix.app", "demo"},
-		{"mystore-admin.tesserix.app", "tesserix.app", "mystore"},
-		{"demo.tesserix.app", "tesserix.app", "demo"},
-		{"www.tesserix.app", "tesserix.app", ""}, // known subdomain
-		{"api.tesserix.app", "tesserix.app", ""},  // known subdomain
-		{"dev.tesserix.app", "tesserix.app", ""},  // known subdomain
-		{"tesserix.app", "tesserix.app", ""},       // root
-		{"localhost:3000", "tesserix.app", ""},
+func TestAuthHandler_Logout_ClearsCookie(t *testing.T) {
+	cfg := newTestConfig()
+	store := session.NewCookieStore(testKey, 24*time.Hour, false)
+	ephemeral := session.NewEphemeralStore()
+	h := &AuthHandler{
+		cfg:       cfg,
+		sessions:  store,
+		ephemeral: ephemeral,
+		events:    nil, // events publisher is nil-safe
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.host, func(t *testing.T) {
-			app := &config.AppConfig{ProductDomain: tt.productDomain}
-			got := extractTenantSlug(tt.host, app)
-			if got != tt.want {
-				t.Errorf("extractTenantSlug(%q, {ProductDomain:%q}) = %q, want %q", tt.host, tt.productDomain, got, tt.want)
-			}
-		})
+	app := newTestApp()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/auth/logout", nil)
+	c.Request.Host = "tesserix.app"
+	c.Set(middleware.ContextKeyApp, app)
+
+	h.Logout(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	// Check that a clearing cookie was set
+	found := false
+	for _, cookie := range w.Result().Cookies() {
+		if cookie.Name == "th_session" && cookie.MaxAge < 0 {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected session cookie to be cleared")
 	}
 }
 
-func TestBuildUserInfo(t *testing.T) {
-	claims := map[string]interface{}{
-		"sub":                "user-123",
-		"email":              "test@example.com",
-		"email_verified":     true,
-		"name":               "Test User",
-		"given_name":         "Test",
-		"family_name":        "User",
-		"preferred_username": "testuser",
-		"tenant_id":          "tenant-1",
-		"platform_owner":     "true",
-		"roles":              []interface{}{"admin", "editor"},
-		"realm_access": map[string]interface{}{
-			"roles": []interface{}{"manage-account", "view-profile"},
-		},
-	}
+func TestAuthHandler_Refresh_NoSession(t *testing.T) {
+	h := &AuthHandler{}
 
-	info := buildUserInfo(claims)
-	if info == nil {
-		t.Fatal("expected non-nil UserInfo")
-	}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/auth/refresh", nil)
+	c.Set(middleware.ContextKeyApp, newTestApp())
 
-	if info.Sub != "user-123" {
-		t.Errorf("Sub = %q", info.Sub)
-	}
-	if info.Email != "test@example.com" {
-		t.Errorf("Email = %q", info.Email)
-	}
-	if !info.EmailVerified {
-		t.Error("EmailVerified should be true")
-	}
-	if info.Name != "Test User" {
-		t.Errorf("Name = %q", info.Name)
-	}
-	if !info.IsPlatformOwner {
-		t.Error("IsPlatformOwner should be true")
-	}
-	if len(info.Roles) != 2 {
-		t.Errorf("Roles len = %d, want 2", len(info.Roles))
-	}
-	if len(info.RealmAccessRoles) != 2 {
-		t.Errorf("RealmAccessRoles len = %d, want 2", len(info.RealmAccessRoles))
+	h.Refresh(c)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
 	}
 }
 
-func TestBuildUserInfo_Nil(t *testing.T) {
-	info := buildUserInfo(nil)
-	if info != nil {
-		t.Error("expected nil for nil claims")
+func TestAuthHandler_Login_NoApp(t *testing.T) {
+	h := &AuthHandler{}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/auth/login", nil)
+	// No app in context
+
+	h.Login(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for unknown app, got %d", w.Code)
 	}
 }
 
-func TestMergeRoles(t *testing.T) {
-	tests := []struct {
-		name string
-		a    []string
-		b    []string
-		want int
-	}{
-		{"no overlap", []string{"admin"}, []string{"editor"}, 2},
-		{"full overlap", []string{"admin"}, []string{"admin"}, 1},
-		{"partial overlap", []string{"admin", "editor"}, []string{"editor", "viewer"}, 3},
-		{"empty a", nil, []string{"admin"}, 1},
-		{"empty b", []string{"admin"}, nil, 1},
-		{"both empty", nil, nil, 0},
-	}
+func TestGenerateRandom(t *testing.T) {
+	r1 := generateRandom(32)
+	r2 := generateRandom(32)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := mergeRoles(tt.a, tt.b)
-			if len(got) != tt.want {
-				t.Errorf("mergeRoles len = %d, want %d", len(got), tt.want)
-			}
-		})
+	if r1 == "" || r2 == "" {
+		t.Error("random string should not be empty")
 	}
-}
-
-func TestClientTypeForRealm(t *testing.T) {
-	if got := clientTypeForRealm("customers"); got != "customer" {
-		t.Errorf("customers realm = %q, want customer", got)
+	if r1 == r2 {
+		t.Error("two random strings should be different")
 	}
-	if got := clientTypeForRealm("internal"); got != "internal" {
-		t.Errorf("internal realm = %q, want internal", got)
-	}
-	if got := clientTypeForRealm("other"); got != "internal" {
-		t.Errorf("other realm = %q, want internal", got)
+	if len(r1) < 32 {
+		t.Errorf("random string too short: %d chars", len(r1))
 	}
 }

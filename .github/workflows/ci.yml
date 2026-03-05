@@ -31,10 +31,10 @@ env:
   GOPRIVATE: github.com/tesserix/*
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  GCP_PROJECT_ID: tesseracthub-480811
+  GCP_PROJECT_ID: tesserix
   GCP_REGION: asia-south1
   GAR_REGISTRY: asia-south1-docker.pkg.dev
-  GAR_REPOSITORY: cloud-run-source-deploy
+  GAR_REPOSITORY: services
   CLOUD_RUN_SERVICE: auth-bff
 
 jobs:

@@ -5,20 +5,24 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
 	"github.com/tesserix/auth-bff/internal/appregistry"
 	"github.com/tesserix/auth-bff/internal/config"
 	"github.com/tesserix/auth-bff/internal/session"
 )
 
 const (
-	ContextKeySession = "bff_session"
-	ContextKeyApp     = "bff_app"
+	ContextKeySession  = "bff_session"
+	ContextKeyApp      = "bff_app"
+	ContextKeyRegistry = "bff_registry"
 )
 
 // AppResolver injects the resolved AppConfig into the request context
 // based on the x-forwarded-host header.
 func AppResolver(registry *appregistry.Registry) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		c.Set(ContextKeyRegistry, registry)
+
 		host := c.GetHeader("x-forwarded-host")
 		if host == "" {
 			host = c.Request.Host
@@ -32,9 +36,9 @@ func AppResolver(registry *appregistry.Registry) gin.HandlerFunc {
 	}
 }
 
-// SessionExtractor reads the session cookie and loads the session from the store.
-// It does NOT abort on missing session — downstream handlers decide auth requirements.
-func SessionExtractor(store session.Store) gin.HandlerFunc {
+// SessionExtractor reads and decrypts the session from the cookie.
+// Does NOT abort on missing session — downstream handlers decide auth requirements.
+func SessionExtractor(store *session.CookieStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		app := GetApp(c)
 		if app == nil {
@@ -42,17 +46,8 @@ func SessionExtractor(store session.Store) gin.HandlerFunc {
 			return
 		}
 
-		cookieValue, err := c.Cookie(app.SessionCookie)
-		if err != nil || cookieValue == "" {
-			c.Next()
-			return
-		}
-
-		// The cookie value is the session ID
-		sess, err := store.GetSession(c.Request.Context(), cookieValue)
+		sess, err := store.Load(c, app.SessionCookie)
 		if err != nil {
-			// Session expired or not found — clear the cookie
-			clearSessionCookie(c, app)
 			c.Next()
 			return
 		}
@@ -67,7 +62,6 @@ func RequireSession() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if GetSession(c) == nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"success": false,
 				"error":   "UNAUTHORIZED",
 				"message": "Authentication required",
 			})
@@ -97,13 +91,25 @@ func GetApp(c *gin.Context) *config.AppConfig {
 	return a
 }
 
+// GetAppByName returns an AppConfig by name from the registry in context.
+func GetAppByName(c *gin.Context, name string) *config.AppConfig {
+	v, ok := c.Get(ContextKeyRegistry)
+	if !ok {
+		return nil
+	}
+	reg, _ := v.(*appregistry.Registry)
+	if reg == nil {
+		return nil
+	}
+	return reg.ResolveByName(name)
+}
+
 // GetEffectiveHost returns the effective external host from the request.
 func GetEffectiveHost(c *gin.Context) string {
 	host := c.GetHeader("x-forwarded-host")
 	if host == "" {
 		host = c.Request.Host
 	}
-	// Handle comma-separated multi-proxy chains
 	if idx := strings.IndexByte(host, ','); idx != -1 {
 		host = strings.TrimSpace(host[:idx])
 	}
@@ -111,16 +117,13 @@ func GetEffectiveHost(c *gin.Context) string {
 }
 
 // GetCookieDomain determines the cookie domain from the request host.
-// Uses the app's product domain and the platform domain for cross-subdomain cookies.
 func GetCookieDomain(host string, app *config.AppConfig, platformDomain string) string {
 	host = strings.ToLower(host)
 
-	// Localhost: no domain (browser defaults)
 	if strings.HasPrefix(host, "localhost") {
 		return ""
 	}
 
-	// Check app's product domain
 	if app != nil && app.ProductDomain != "" {
 		d := app.ProductDomain
 		if strings.HasSuffix(host, "."+d) || host == d {
@@ -128,20 +131,23 @@ func GetCookieDomain(host string, app *config.AppConfig, platformDomain string) 
 		}
 	}
 
-	// Check platform domain
 	if platformDomain != "" {
 		if strings.HasSuffix(host, "."+platformDomain) || host == platformDomain {
 			return "." + platformDomain
 		}
 	}
 
-	// Custom domains: strip www, set parent domain
 	if strings.HasPrefix(host, "www.") {
 		host = host[4:]
 	}
 	return "." + host
 }
 
-func clearSessionCookie(c *gin.Context, app *config.AppConfig) {
-	c.SetCookie(app.SessionCookie, "", -1, "/", "", false, true)
+// ExtractBearerToken extracts the token from Authorization: Bearer <token>.
+func ExtractBearerToken(c *gin.Context) string {
+	auth := c.GetHeader("Authorization")
+	if strings.HasPrefix(auth, "Bearer ") {
+		return auth[7:]
+	}
+	return ""
 }

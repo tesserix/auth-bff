@@ -1,28 +1,25 @@
 package clients
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 
-	"github.com/tesserix/go-shared/httpclient"
+	"github.com/tesserix/go-shared/serviceclient"
 )
 
-// TenantClient communicates with the tenant-service.
+// TenantClient communicates with the tenant-service using auto-authenticated
+// service-to-service calls (OIDC on Cloud Run, shared key for local dev).
 type TenantClient struct {
-	baseURL    string
-	httpClient *http.Client
+	client *serviceclient.Client
 }
 
-// NewTenantClient creates a new tenant-service client.
-func NewTenantClient(baseURL string) *TenantClient {
-	return &TenantClient{
-		baseURL:    baseURL,
-		httpClient: httpclient.NewClientWithProfile(httpclient.ProfileDefault),
+// NewTenantClient creates a new tenant-service client with automatic auth.
+func NewTenantClient(baseURL string) (*TenantClient, error) {
+	client, err := serviceclient.NewClient(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("create tenant client: %w", err)
 	}
+	return &TenantClient{client: client}, nil
 }
 
 // Tenant represents a tenant returned from lookup.
@@ -44,7 +41,7 @@ type UserTenantsResponse struct {
 func (c *TenantClient) GetUserTenants(ctx context.Context, email string) (*UserTenantsResponse, error) {
 	body := map[string]string{"email": email}
 	var resp UserTenantsResponse
-	if err := c.post(ctx, "/api/v1/auth/lookup-tenants", body, &resp); err != nil {
+	if err := c.client.Post(ctx, "/api/v1/auth/lookup-tenants", body, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -89,7 +86,7 @@ type ValidateCredentialsResponse struct {
 // ValidateCredentials validates user credentials via tenant-service.
 func (c *TenantClient) ValidateCredentials(ctx context.Context, req *ValidateCredentialsRequest) (*ValidateCredentialsResponse, error) {
 	var resp ValidateCredentialsResponse
-	if err := c.post(ctx, "/api/v1/auth/validate-credentials", req, &resp); err != nil {
+	if err := c.client.Post(ctx, "/api/v1/auth/validate-credentials", req, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -120,7 +117,7 @@ type RegisterCustomerResponse struct {
 // RegisterCustomer registers a new customer.
 func (c *TenantClient) RegisterCustomer(ctx context.Context, req *RegisterCustomerRequest) (*RegisterCustomerResponse, error) {
 	var resp RegisterCustomerResponse
-	if err := c.post(ctx, "/api/v1/auth/register", req, &resp); err != nil {
+	if err := c.client.Post(ctx, "/api/v1/auth/register", req, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -136,14 +133,14 @@ type PasswordResetRequest struct {
 // RequestPasswordReset initiates a password reset.
 func (c *TenantClient) RequestPasswordReset(ctx context.Context, req *PasswordResetRequest) error {
 	var resp map[string]interface{}
-	return c.post(ctx, "/api/v1/auth/request-password-reset", req, &resp)
+	return c.client.Post(ctx, "/api/v1/auth/request-password-reset", req, &resp)
 }
 
 // ResetPassword completes a password reset with a token.
 func (c *TenantClient) ResetPassword(ctx context.Context, token, newPassword string) error {
 	body := map[string]string{"token": token, "new_password": newPassword}
 	var resp map[string]interface{}
-	return c.post(ctx, "/api/v1/auth/reset-password", body, &resp)
+	return c.client.Post(ctx, "/api/v1/auth/reset-password", body, &resp)
 }
 
 // ValidateResetToken checks if a reset token is valid.
@@ -153,7 +150,7 @@ func (c *TenantClient) ValidateResetToken(ctx context.Context, token string) (bo
 		Valid     bool `json:"valid"`
 		ExpiresIn int  `json:"expires_in"`
 	}
-	if err := c.post(ctx, "/api/v1/auth/validate-reset-token", body, &resp); err != nil {
+	if err := c.client.Post(ctx, "/api/v1/auth/validate-reset-token", body, &resp); err != nil {
 		return false, 0, err
 	}
 	return resp.Valid, resp.ExpiresIn, nil
@@ -167,7 +164,7 @@ func (c *TenantClient) ChangePassword(ctx context.Context, userID, currentPasswo
 		"new_password":     newPassword,
 	}
 	var resp map[string]interface{}
-	return c.post(ctx, "/api/v1/auth/change-password", body, &resp)
+	return c.client.Post(ctx, "/api/v1/auth/change-password", body, &resp)
 }
 
 // TOTPSecretResponse is the response from getting TOTP secret.
@@ -182,7 +179,7 @@ type TOTPSecretResponse struct {
 func (c *TenantClient) GetTOTPSecret(ctx context.Context, userID, tenantID string) (*TOTPSecretResponse, error) {
 	var resp TOTPSecretResponse
 	endpoint := fmt.Sprintf("/api/v1/auth/totp/secret?user_id=%s&tenant_id=%s", userID, tenantID)
-	if err := c.get(ctx, endpoint, &resp); err != nil {
+	if err := c.client.Get(ctx, endpoint, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -197,14 +194,14 @@ func (c *TenantClient) EnableTOTP(ctx context.Context, userID, tenantID, encrypt
 		"backup_code_hashes": backupCodeHashes,
 	}
 	var resp map[string]interface{}
-	return c.post(ctx, "/api/v1/auth/totp/enable", body, &resp)
+	return c.client.Post(ctx, "/api/v1/auth/totp/enable", body, &resp)
 }
 
 // DisableTOTP disables TOTP for a user.
 func (c *TenantClient) DisableTOTP(ctx context.Context, userID, tenantID string) error {
 	body := map[string]string{"user_id": userID, "tenant_id": tenantID}
 	var resp map[string]interface{}
-	return c.post(ctx, "/api/v1/auth/totp/disable", body, &resp)
+	return c.client.Post(ctx, "/api/v1/auth/totp/disable", body, &resp)
 }
 
 // ConsumeBackupCode marks a backup code as used.
@@ -215,7 +212,7 @@ func (c *TenantClient) ConsumeBackupCode(ctx context.Context, userID, tenantID, 
 		"code_hash": codeHash,
 	}
 	var resp map[string]interface{}
-	return c.post(ctx, "/api/v1/auth/totp/consume-backup", body, &resp)
+	return c.client.Post(ctx, "/api/v1/auth/totp/consume-backup", body, &resp)
 }
 
 // RegenerateBackupCodes generates new backup codes for a user.
@@ -226,18 +223,18 @@ func (c *TenantClient) RegenerateBackupCodes(ctx context.Context, userID, tenant
 		"backup_code_hashes": hashes,
 	}
 	var resp map[string]interface{}
-	return c.post(ctx, "/api/v1/auth/totp/regenerate-backups", body, &resp)
+	return c.client.Post(ctx, "/api/v1/auth/totp/regenerate-backups", body, &resp)
 }
 
 // PasskeyCredential represents a stored passkey.
 type PasskeyCredential struct {
-	CredentialID string `json:"credential_id"`
-	PublicKey    string `json:"public_key"`
-	Name         string `json:"name"`
+	CredentialID string   `json:"credential_id"`
+	PublicKey    string   `json:"public_key"`
+	Name         string   `json:"name"`
 	Transports   []string `json:"transports,omitempty"`
-	SignCount    uint32 `json:"sign_count"`
-	CreatedAt    string `json:"created_at"`
-	LastUsedAt   string `json:"last_used_at,omitempty"`
+	SignCount    uint32   `json:"sign_count"`
+	CreatedAt    string   `json:"created_at"`
+	LastUsedAt   string   `json:"last_used_at,omitempty"`
 }
 
 // GetPasskeys fetches all passkeys for a user.
@@ -246,7 +243,7 @@ func (c *TenantClient) GetPasskeys(ctx context.Context, userID, tenantID string)
 		Passkeys []PasskeyCredential `json:"passkeys"`
 	}
 	endpoint := fmt.Sprintf("/api/v1/auth/passkeys?user_id=%s&tenant_id=%s", userID, tenantID)
-	if err := c.get(ctx, endpoint, &resp); err != nil {
+	if err := c.client.Get(ctx, endpoint, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Passkeys, nil
@@ -264,33 +261,33 @@ func (c *TenantClient) SavePasskey(ctx context.Context, userID, tenantID string,
 		"sign_count":    cred.SignCount,
 	}
 	var resp map[string]interface{}
-	return c.post(ctx, "/api/v1/auth/passkeys", body, &resp)
+	return c.client.Post(ctx, "/api/v1/auth/passkeys", body, &resp)
 }
 
 // DeletePasskey removes a passkey credential.
 func (c *TenantClient) DeletePasskey(ctx context.Context, userID, tenantID, credentialID string) error {
 	endpoint := fmt.Sprintf("/api/v1/auth/passkeys/%s?user_id=%s&tenant_id=%s", credentialID, userID, tenantID)
-	return c.delete(ctx, endpoint)
+	return c.client.Delete(ctx, endpoint, nil)
 }
 
-// CheckAccountStatus checks if an account exists and its status.
+// AccountStatusResponse represents account status.
 type AccountStatusResponse struct {
-	AccountExists    bool   `json:"account_exists"`
-	AccountLocked    bool   `json:"account_locked"`
-	LockedUntil      string `json:"locked_until,omitempty"`
-	RemainingAttempts int   `json:"remaining_attempts"`
+	AccountExists     bool   `json:"account_exists"`
+	AccountLocked     bool   `json:"account_locked"`
+	LockedUntil       string `json:"locked_until,omitempty"`
+	RemainingAttempts int    `json:"remaining_attempts"`
 }
 
 func (c *TenantClient) CheckAccountStatus(ctx context.Context, email, tenantSlug string) (*AccountStatusResponse, error) {
 	body := map[string]string{"email": email, "tenant_slug": tenantSlug}
 	var resp AccountStatusResponse
-	if err := c.post(ctx, "/api/v1/auth/account-status", body, &resp); err != nil {
+	if err := c.client.Post(ctx, "/api/v1/auth/account-status", body, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
 }
 
-// CheckDeactivated checks if an account is deactivated.
+// DeactivatedResponse represents deactivation status.
 type DeactivatedResponse struct {
 	IsDeactivated  bool   `json:"is_deactivated"`
 	CanReactivate  bool   `json:"can_reactivate"`
@@ -302,7 +299,7 @@ type DeactivatedResponse struct {
 func (c *TenantClient) CheckDeactivated(ctx context.Context, email, tenantSlug string) (*DeactivatedResponse, error) {
 	body := map[string]string{"email": email, "tenant_slug": tenantSlug}
 	var resp DeactivatedResponse
-	if err := c.post(ctx, "/api/v1/auth/check-deactivated", body, &resp); err != nil {
+	if err := c.client.Post(ctx, "/api/v1/auth/check-deactivated", body, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -312,74 +309,12 @@ func (c *TenantClient) CheckDeactivated(ctx context.Context, email, tenantSlug s
 func (c *TenantClient) ReactivateAccount(ctx context.Context, email, password, tenantSlug string) error {
 	body := map[string]string{"email": email, "password": password, "tenant_slug": tenantSlug}
 	var resp map[string]interface{}
-	return c.post(ctx, "/api/v1/auth/reactivate", body, &resp)
+	return c.client.Post(ctx, "/api/v1/auth/reactivate", body, &resp)
 }
 
 // DeactivateAccount deactivates a user account.
 func (c *TenantClient) DeactivateAccount(ctx context.Context, userID, tenantID, reason string) error {
 	body := map[string]string{"user_id": userID, "tenant_id": tenantID, "reason": reason}
 	var resp map[string]interface{}
-	return c.post(ctx, "/api/v1/auth/deactivate", body, &resp)
-}
-
-// HTTP helpers
-
-func (c *TenantClient) post(ctx context.Context, path string, body interface{}, result interface{}) error {
-	data, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("marshal request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(data))
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Internal-Service", "auth-bff")
-
-	return c.doRequest(req, result)
-}
-
-func (c *TenantClient) get(ctx context.Context, path string, result interface{}) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("X-Internal-Service", "auth-bff")
-
-	return c.doRequest(req, result)
-}
-
-func (c *TenantClient) delete(ctx context.Context, path string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+path, nil)
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("X-Internal-Service", "auth-bff")
-
-	return c.doRequest(req, nil)
-}
-
-func (c *TenantClient) doRequest(req *http.Request, result interface{}) error {
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("request %s %s: %w", req.Method, req.URL.Path, err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read response: %w", err)
-	}
-
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("tenant-service %s %s returned %d: %s", req.Method, req.URL.Path, resp.StatusCode, string(respBody))
-	}
-
-	if result != nil && len(respBody) > 0 {
-		if err := json.Unmarshal(respBody, result); err != nil {
-			return fmt.Errorf("unmarshal response: %w", err)
-		}
-	}
-	return nil
+	return c.client.Post(ctx, "/api/v1/auth/deactivate", body, &resp)
 }

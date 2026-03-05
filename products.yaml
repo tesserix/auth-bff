@@ -1,6 +1,12 @@
 # Product registry for auth-bff
-# Mounted as ConfigMap in K8s, loaded from PRODUCTS_CONFIG_PATH env var.
+# Loaded from PRODUCTS_CONFIG_PATH env var.
 # Secrets are referenced by env var name (clientSecretEnv) — never inline.
+#
+# Auth isolation:
+#   - gipTenantId: Google Identity Platform tenant (like Keycloak realms)
+#     - "staff" tenant: platform admins, marketplace staff
+#     - "customer" tenant: storefront end-users
+#   - Roles within each tenant are managed by OpenFGA
 
 platformDomain: tesserix.app
 
@@ -14,8 +20,8 @@ products:
           - "www.tesserix.app"
           - "dev.tesserix.app"
           - "localhost:3002"
-        realm: internal
-        clientId: platform
+        gipTenantId: staff
+        oauthClientId: platform-web-client
         clientSecretEnv: PLATFORM_CLIENT_SECRET
         sessionCookie: bff_home_session
         callbackPath: /auth/callback
@@ -34,9 +40,9 @@ products:
   #   apps:
   #     - name: admin
   #       hosts: ["*-admin.mark8ly.com", "admin.localhost", "localhost:3000"]
-  #       realm: internal
-  #       clientId: marketplace-dashboard
-  #       clientSecretEnv: MARKETPLACE_DASHBOARD_CLIENT_SECRET
+  #       gipTenantId: staff           # Same GIP tenant as platform (shared staff users)
+  #       oauthClientId: mp-admin-web-client
+  #       clientSecretEnv: MARKETPLACE_ADMIN_CLIENT_SECRET
   #       sessionCookie: bff_session
   #       callbackPath: /auth/callback
   #       postLoginUrl: /
@@ -45,9 +51,9 @@ products:
   #       allowedOrigins: ["https://*-admin.mark8ly.com", "http://localhost:3000"]
   #     - name: storefront
   #       hosts: ["*.mark8ly.com"]
-  #       realm: customers
-  #       clientId: storefront-bff
-  #       clientSecretEnv: STOREFRONT_BFF_CLIENT_SECRET
+  #       gipTenantId: customer        # Separate GIP tenant (separate user pool)
+  #       oauthClientId: mp-storefront-web-client
+  #       clientSecretEnv: STOREFRONT_CLIENT_SECRET
   #       sessionCookie: bff_storefront_session
   #       callbackPath: /auth/callback
   #       postLoginUrl: /
@@ -56,9 +62,9 @@ products:
   #       allowedOrigins: ["https://*.mark8ly.com"]
   #     - name: onboarding
   #       hosts: ["onboarding.mark8ly.com", "*-onboarding.mark8ly.com", "localhost:3001"]
-  #       realm: internal
-  #       clientId: marketplace-dashboard
-  #       clientSecretEnv: MARKETPLACE_DASHBOARD_CLIENT_SECRET
+  #       gipTenantId: staff
+  #       oauthClientId: mp-admin-web-client
+  #       clientSecretEnv: MARKETPLACE_ADMIN_CLIENT_SECRET
   #       sessionCookie: bff_session
   #       callbackPath: /auth/callback
   #       postLoginUrl: /

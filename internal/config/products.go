@@ -53,7 +53,7 @@ func (c *Config) LoadProducts() error {
 			if app.ClientSecretEnv == "" {
 				return fmt.Errorf("products config: app %q in product %q has no clientSecretEnv", app.Name, product.Name)
 			}
-			app.ClientSecret = os.Getenv(app.ClientSecretEnv)
+			app.OAuthClientSecret = os.Getenv(app.ClientSecretEnv)
 			app.ProductDomain = product.Domain
 			apps = append(apps, app)
 		}

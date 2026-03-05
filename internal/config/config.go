@@ -14,51 +14,35 @@ type Config struct {
 	Environment string
 	ServiceName string
 
-	// Redis
-	RedisURL      string
-	RedisPassword string
+	// Google Identity Platform
+	GCPProjectID string
+	GIPAPIKey    string // GIP web API key (for client-side flows)
 
-	// Keycloak base URLs (shared across all realms)
-	KeycloakURL                string
-	KeycloakInternalURL        string // Optional: internal URL for server-to-server calls (bypass CDN)
-	CustomerKeycloakURL        string // Optional: separate public URL for customer realm
-	CustomerKeycloakInternalURL string // Optional: separate internal URL for customer realm
-	InternalRealm              string // Realm name for internal/staff apps
-	CustomerRealm              string // Realm name for customer-facing apps
-
-	// Session
-	SessionSecret string
-	SessionMaxAge time.Duration
+	// Session cookies
+	CookieEncryptionKey string // AES-256 key (hex) for encrypted session cookies
+	SessionMaxAge       time.Duration
+	CookieSecure        bool // Set to true in production (HTTPS only)
 
 	// CSRF
 	CSRFSecret string
 
-	// Encryption
+	// MFA encryption
 	EncryptionKey           string // AES key for TOTP secrets (hex)
 	BackupCodeHMACKey       string
 	TOTPKeyDerivationSecret string
 
 	// Products config
-	ProductsConfigPath string // Path to products.yaml (default: "products.yaml")
-	PlatformDomain     string // From products.yaml — used for WebAuthn RP ID and cross-product cookies
+	ProductsConfigPath string
+	PlatformDomain     string // From products.yaml
 
 	// WebAuthn
 	WebAuthnRPID   string
 	WebAuthnRPName string
 
-	// External services
-	TenantServiceURL       string
-	VerificationServiceURL string
-	VerificationAPIKey     string
-	APIGatewayURL          string
+	// External services (Cloud Run, auto-authenticated via OIDC)
+	TenantServiceURL string
 
-	// NATS
-	NATSURL string
-
-	// GCP
-	GCPProjectID string
-
-	// Internal service auth
+	// Internal service auth (for service-to-service calls TO this BFF)
 	InternalServiceKey string
 
 	// Rate limiting
@@ -71,19 +55,19 @@ type Config struct {
 // AppConfig defines per-application configuration.
 // Loaded from products.yaml — one entry per app across all products.
 type AppConfig struct {
-	Name            string   `yaml:"name" json:"name"`
-	Hosts           []string `yaml:"hosts" json:"hosts"`
-	Realm           string   `yaml:"realm" json:"realm"`
-	ClientID        string   `yaml:"clientId" json:"clientId"`
-	ClientSecret    string   `yaml:"-" json:"-"`
-	ClientSecretEnv string   `yaml:"clientSecretEnv" json:"-"`
-	SessionCookie   string   `yaml:"sessionCookie" json:"sessionCookie"`
-	CallbackPath    string   `yaml:"callbackPath" json:"callbackPath"`
-	PostLoginURL    string   `yaml:"postLoginUrl" json:"postLoginUrl"`
-	PostLogoutURL   string   `yaml:"postLogoutUrl" json:"postLogoutUrl"`
-	AllowedOrigins  []string `yaml:"allowedOrigins" json:"allowedOrigins"`
-	AuthContext     string   `yaml:"authContext" json:"authContext"` // "staff" or "customer"
-	ProductDomain   string   `yaml:"-" json:"-"`                    // Set from parent product
+	Name           string   `yaml:"name" json:"name"`
+	Hosts          []string `yaml:"hosts" json:"hosts"`
+	GIPTenantID    string   `yaml:"gipTenantId" json:"gipTenantId"`       // GIP tenant ID (e.g., "staff", "customer")
+	OAuthClientID  string   `yaml:"oauthClientId" json:"oauthClientId"`   // OAuth 2.0 client ID in GIP
+	OAuthClientSecret string `yaml:"-" json:"-"`
+	ClientSecretEnv   string `yaml:"clientSecretEnv" json:"-"`
+	SessionCookie  string   `yaml:"sessionCookie" json:"sessionCookie"`
+	CallbackPath   string   `yaml:"callbackPath" json:"callbackPath"`
+	PostLoginURL   string   `yaml:"postLoginUrl" json:"postLoginUrl"`
+	PostLogoutURL  string   `yaml:"postLogoutUrl" json:"postLogoutUrl"`
+	AllowedOrigins []string `yaml:"allowedOrigins" json:"allowedOrigins"`
+	AuthContext    string   `yaml:"authContext" json:"authContext"` // "staff" or "customer"
+	ProductDomain  string   `yaml:"-" json:"-"`
 }
 
 // Load reads configuration from environment variables and products.yaml.
@@ -93,18 +77,12 @@ func Load() (*Config, error) {
 		Environment: getEnv("APP_ENV", "development"),
 		ServiceName: "auth-bff",
 
-		RedisURL:      getEnv("REDIS_URL", "redis://localhost:6379"),
-		RedisPassword: os.Getenv("REDIS_PASSWORD"),
+		GCPProjectID: getEnv("GCP_PROJECT_ID", ""),
+		GIPAPIKey:    os.Getenv("GIP_API_KEY"),
 
-		KeycloakURL:                 getEnv("KEYCLOAK_URL", "https://auth.tesserix.app"),
-		KeycloakInternalURL:         getEnv("KEYCLOAK_INTERNAL_URL", ""),
-		CustomerKeycloakURL:         getEnv("CUSTOMER_KEYCLOAK_URL", ""),
-		CustomerKeycloakInternalURL: getEnv("CUSTOMER_KEYCLOAK_INTERNAL_URL", ""),
-		InternalRealm:               getEnv("INTERNAL_REALM", "internal"),
-		CustomerRealm:               getEnv("CUSTOMER_REALM", "customers"),
-
-		SessionSecret: os.Getenv("SESSION_SECRET"),
-		SessionMaxAge: getEnvAsDuration("SESSION_MAX_AGE", 24*time.Hour),
+		CookieEncryptionKey: os.Getenv("COOKIE_ENCRYPTION_KEY"),
+		SessionMaxAge:       getEnvAsDuration("SESSION_MAX_AGE", 24*time.Hour),
+		CookieSecure:        getEnv("APP_ENV", "development") == "production",
 
 		CSRFSecret: os.Getenv("CSRF_SECRET"),
 
@@ -117,14 +95,7 @@ func Load() (*Config, error) {
 		WebAuthnRPID:   getEnv("WEBAUTHN_RP_ID", "tesserix.app"),
 		WebAuthnRPName: getEnv("WEBAUTHN_RP_NAME", "Tesserix"),
 
-		TenantServiceURL:       getEnv("TENANT_SERVICE_URL", "http://tenant-service:8091"),
-		VerificationServiceURL: getEnv("VERIFICATION_SERVICE_URL", ""),
-		VerificationAPIKey:     os.Getenv("VERIFICATION_SERVICE_API_KEY"),
-		APIGatewayURL:          getEnv("API_GATEWAY_URL", "http://api-gateway:8080"),
-
-		NATSURL: getEnv("NATS_URL", "nats://nats.nats:4222"),
-
-		GCPProjectID: getEnv("GCP_PROJECT_ID", ""),
+		TenantServiceURL: getEnv("TENANT_SERVICE_URL", "http://localhost:8091"),
 
 		InternalServiceKey: os.Getenv("INTERNAL_SERVICE_KEY"),
 
@@ -146,25 +117,23 @@ func Load() (*Config, error) {
 func (c *Config) Validate() error {
 	if c.IsProduction() {
 		required := map[string]string{
-			"SESSION_SECRET":    c.SessionSecret,
-			"CSRF_SECRET":       c.CSRFSecret,
-			"ENCRYPTION_KEY":    c.EncryptionKey,
-			"BACKUP_CODE_HMAC_KEY": c.BackupCodeHMACKey,
+			"COOKIE_ENCRYPTION_KEY": c.CookieEncryptionKey,
+			"CSRF_SECRET":          c.CSRFSecret,
+			"GCP_PROJECT_ID":       c.GCPProjectID,
 		}
 		for name, val := range required {
 			if val == "" {
 				return fmt.Errorf("required env var %s is not set", name)
 			}
 		}
-		if len(c.SessionSecret) < 32 {
-			return fmt.Errorf("SESSION_SECRET must be at least 32 characters")
+		if len(c.CookieEncryptionKey) < 32 {
+			return fmt.Errorf("COOKIE_ENCRYPTION_KEY must be at least 32 characters")
 		}
 		if len(c.CSRFSecret) < 32 {
 			return fmt.Errorf("CSRF_SECRET must be at least 32 characters")
 		}
-		// Validate that all apps have their client secrets resolved
 		for _, app := range c.Apps {
-			if app.ClientSecret == "" {
+			if app.OAuthClientSecret == "" {
 				return fmt.Errorf("client secret for app %q (env: %s) is not set", app.Name, app.ClientSecretEnv)
 			}
 		}
@@ -172,22 +141,12 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// CustomerKeycloakPublicURL returns the public Keycloak URL for the customer realm.
-// Falls back to the shared KeycloakURL if not set.
-func (c *Config) CustomerKeycloakPublicURL() string {
-	if c.CustomerKeycloakURL != "" {
-		return c.CustomerKeycloakURL
+// GIPIssuerURL returns the OIDC issuer URL for a GIP tenant.
+func (c *Config) GIPIssuerURL(gipTenantID string) string {
+	if gipTenantID == "" {
+		return fmt.Sprintf("https://securetoken.google.com/%s", c.GCPProjectID)
 	}
-	return c.KeycloakURL
-}
-
-// CustomerKeycloakDiscoveryURL returns the internal Keycloak URL for the customer realm.
-// Falls back to the shared KeycloakInternalURL if not set.
-func (c *Config) CustomerKeycloakDiscoveryURL() string {
-	if c.CustomerKeycloakInternalURL != "" {
-		return c.CustomerKeycloakInternalURL
-	}
-	return c.KeycloakInternalURL
+	return fmt.Sprintf("https://securetoken.google.com/%s", c.GCPProjectID)
 }
 
 // IsProduction returns true if running in production.

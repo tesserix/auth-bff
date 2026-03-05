@@ -190,7 +190,7 @@ func TestRequireSession(t *testing.T) {
 	// With session
 	r2 := gin.New()
 	r2.Use(func(c *gin.Context) {
-		c.Set(ContextKeySession, &session.Session{ID: "test"})
+		c.Set(ContextKeySession, &session.Session{UserID: "test"})
 		c.Next()
 	})
 	r2.Use(RequireSession())

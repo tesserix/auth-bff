@@ -2,122 +2,90 @@ package events
 
 import (
 	"context"
-	"time"
+	"log/slog"
 
-	"github.com/tesserix/go-shared/events"
-	"github.com/tesserix/go-shared/logger"
+	"github.com/tesserix/go-shared/messaging"
 )
 
-// Publisher wraps go-shared NATS event publishing for auth events.
+// Publisher wraps go-shared Pub/Sub event publishing for auth events.
 type Publisher struct {
-	pub    *events.Publisher
-	logger *logger.Logger
+	pub *messaging.Publisher
 }
 
-// NewPublisher creates a new auth event publisher.
-// Returns nil (with a warning) if NATS is unavailable — events are optional.
-func NewPublisher(natsURL string, logger *logger.Logger) *Publisher {
-	if natsURL == "" {
-		logger.Warn("NATS URL not configured, event publishing disabled")
-		return &Publisher{logger: logger}
+// NewPublisher creates a new auth event publisher using Google Pub/Sub.
+// Returns a no-op publisher if projectID is empty (local dev without Pub/Sub).
+func NewPublisher(ctx context.Context, projectID string) *Publisher {
+	if projectID == "" {
+		slog.Warn("GCP project ID not configured, event publishing disabled")
+		return &Publisher{}
 	}
 
-	cfg := events.DefaultPublisherConfig(natsURL)
-	cfg.Name = "auth-bff"
-	cfg.ConnectTimeout = 10 * time.Second
-
-	pub, err := events.NewPublisher(cfg, nil) // go-shared uses logrus; we pass nil
+	pub, err := messaging.NewPublisher(ctx, projectID, "auth-bff")
 	if err != nil {
-		logger.Warn("NATS connection failed, event publishing disabled", "error", err)
-		return &Publisher{logger: logger}
+		slog.Warn("Pub/Sub publisher creation failed, event publishing disabled", "error", err)
+		return &Publisher{}
 	}
 
-	// Ensure auth event stream exists
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := pub.EnsureStream(ctx, "AUTH_EVENTS", []string{"auth.>"}); err != nil {
-		logger.Warn("failed to ensure auth event stream", "error", err)
-	}
-
-	return &Publisher{pub: pub, logger: logger}
+	return &Publisher{pub: pub}
 }
 
-// PublishLoginSuccess publishes a login success event (non-blocking).
+// PublishLoginSuccess publishes a login success event (async, fire-and-forget).
 func (p *Publisher) PublishLoginSuccess(ctx context.Context, tenantID, userID, email, ipAddress, userAgent, loginMethod string) {
 	if p.pub == nil {
 		return
 	}
 
-	go func() {
-		event := &events.AuthEvent{
-			BaseEvent: events.BaseEvent{
-				EventType: "auth.login_success",
-				TenantID:  tenantID,
-				Timestamp: time.Now(),
-			},
-			UserID:      userID,
-			Email:       email,
-			IPAddress:   ipAddress,
-			UserAgent:   userAgent,
-			LoginMethod: loginMethod,
-		}
-
-		if err := p.pub.Publish(ctx, event); err != nil {
-			p.logger.Warn("failed to publish login event", "error", err)
-		}
-	}()
+	p.pub.PublishAsync(ctx, messaging.TopicAuditEvents, messaging.EventUserLogin, tenantID, map[string]string{
+		"user_id":      userID,
+		"email":        email,
+		"ip_address":   ipAddress,
+		"user_agent":   userAgent,
+		"login_method": loginMethod,
+	})
 }
 
-// PublishLoginFailed publishes a login failure event (non-blocking).
+// PublishLoginFailed publishes a login failure event (async, fire-and-forget).
 func (p *Publisher) PublishLoginFailed(ctx context.Context, tenantID, email, ipAddress, userAgent, reason string) {
 	if p.pub == nil {
 		return
 	}
 
-	go func() {
-		event := &events.AuthEvent{
-			BaseEvent: events.BaseEvent{
-				EventType: "auth.login_failed",
-				TenantID:  tenantID,
-				Timestamp: time.Now(),
-			},
-			Email:     email,
-			IPAddress: ipAddress,
-			UserAgent: userAgent,
-		}
-
-		if err := p.pub.Publish(ctx, event); err != nil {
-			p.logger.Warn("failed to publish login failed event", "error", err)
-		}
-	}()
+	p.pub.PublishAsync(ctx, messaging.TopicAuditEvents, "auth.login.failed", tenantID, map[string]string{
+		"email":      email,
+		"ip_address": ipAddress,
+		"user_agent": userAgent,
+		"reason":     reason,
+	})
 }
 
-// PublishLogout publishes a logout event (non-blocking).
+// PublishLogout publishes a logout event (async, fire-and-forget).
 func (p *Publisher) PublishLogout(ctx context.Context, tenantID, userID, email string) {
 	if p.pub == nil {
 		return
 	}
 
-	go func() {
-		event := &events.AuthEvent{
-			BaseEvent: events.BaseEvent{
-				EventType: "auth.logout",
-				TenantID:  tenantID,
-				Timestamp: time.Now(),
-			},
-			UserID: userID,
-			Email:  email,
-		}
-
-		if err := p.pub.Publish(ctx, event); err != nil {
-			p.logger.Warn("failed to publish logout event", "error", err)
-		}
-	}()
+	p.pub.PublishAsync(ctx, messaging.TopicAuditEvents, messaging.EventUserLogout, tenantID, map[string]string{
+		"user_id": userID,
+		"email":   email,
+	})
 }
 
-// Close shuts down the NATS connection.
-func (p *Publisher) Close() {
-	if p.pub != nil {
-		p.pub.Close()
+// PublishSessionCreated publishes a session creation event.
+func (p *Publisher) PublishSessionCreated(ctx context.Context, tenantID, userID, sessionID string) {
+	if p.pub == nil {
+		return
 	}
+
+	p.pub.PublishAsync(ctx, messaging.TopicAuditEvents, messaging.EventSessionCreated, tenantID, map[string]string{
+		"user_id":    userID,
+		"session_id": sessionID,
+	})
+}
+
+// Close flushes pending messages and releases resources.
+func (p *Publisher) Close() error {
+	if p.pub != nil {
+		return p.pub.Close()
+	}
+	return nil
 }

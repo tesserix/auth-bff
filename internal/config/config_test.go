@@ -29,8 +29,8 @@ products:
           - "www.tesserix.app"
           - "dev.tesserix.app"
           - "localhost:3002"
-        realm: internal
-        clientId: platform
+        gipTenantId: staff
+        oauthClientId: platform-client
         clientSecretEnv: PLATFORM_CLIENT_SECRET
         sessionCookie: bff_home_session
         callbackPath: /auth/callback
@@ -49,7 +49,7 @@ func TestLoad_WithProducts(t *testing.T) {
 	t.Setenv("PRODUCTS_CONFIG_PATH", path)
 	t.Setenv("PLATFORM_CLIENT_SECRET", "test-secret")
 
-	for _, k := range []string{"PORT", "APP_ENV", "REDIS_URL", "KEYCLOAK_URL"} {
+	for _, k := range []string{"PORT", "APP_ENV"} {
 		os.Unsetenv(k)
 	}
 
@@ -70,11 +70,14 @@ func TestLoad_WithProducts(t *testing.T) {
 	if app.Name != "home" {
 		t.Errorf("app name = %q, want home", app.Name)
 	}
-	if app.ClientID != "platform" {
-		t.Errorf("clientId = %q, want platform", app.ClientID)
+	if app.GIPTenantID != "staff" {
+		t.Errorf("gipTenantId = %q, want staff", app.GIPTenantID)
 	}
-	if app.ClientSecret != "test-secret" {
-		t.Errorf("clientSecret not resolved from env")
+	if app.OAuthClientID != "platform-client" {
+		t.Errorf("oauthClientId = %q, want platform-client", app.OAuthClientID)
+	}
+	if app.OAuthClientSecret != "test-secret" {
+		t.Errorf("oauthClientSecret not resolved from env")
 	}
 	if app.ProductDomain != "tesserix.app" {
 		t.Errorf("ProductDomain = %q, want tesserix.app", app.ProductDomain)
@@ -95,7 +98,7 @@ func TestLoad_Defaults(t *testing.T) {
 	t.Setenv("PRODUCTS_CONFIG_PATH", path)
 	t.Setenv("PLATFORM_CLIENT_SECRET", "test-secret")
 
-	for _, k := range []string{"PORT", "APP_ENV", "REDIS_URL", "KEYCLOAK_URL"} {
+	for _, k := range []string{"PORT", "APP_ENV"} {
 		os.Unsetenv(k)
 	}
 
@@ -112,10 +115,6 @@ func TestLoad_Defaults(t *testing.T) {
 		{"port", cfg.Port, "8080"},
 		{"environment", cfg.Environment, "development"},
 		{"service_name", cfg.ServiceName, "auth-bff"},
-		{"redis_url", cfg.RedisURL, "redis://localhost:6379"},
-		{"keycloak_url", cfg.KeycloakURL, "https://auth.tesserix.app"},
-		{"internal_realm", cfg.InternalRealm, "internal"},
-		{"customer_realm", cfg.CustomerRealm, "customers"},
 		{"platform_domain", cfg.PlatformDomain, "tesserix.app"},
 	}
 
@@ -159,8 +158,8 @@ products:
     apps:
       - name: app1
         hosts: ["localhost"]
-        realm: internal
-        clientId: test
+        gipTenantId: staff
+        oauthClientId: test
         clientSecretEnv: TEST_SECRET
         sessionCookie: test_session
         callbackPath: /callback
@@ -184,22 +183,21 @@ func TestValidate_Production(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "missing session secret",
+			name: "missing cookie encryption key",
 			setup: func(c *Config) {
 				c.Environment = "production"
-				c.SessionSecret = ""
+				c.CookieEncryptionKey = ""
 			},
 			wantErr: true,
 		},
 		{
-			name: "short session secret",
+			name: "short cookie encryption key",
 			setup: func(c *Config) {
 				c.Environment = "production"
-				c.SessionSecret = "short"
+				c.CookieEncryptionKey = "short"
 				c.CSRFSecret = "a]3HQkw@&C!z9yV^BkW#nX2$pL8rJ5mA"
-				c.EncryptionKey = "key"
-				c.BackupCodeHMACKey = "key"
-				c.Apps = []AppConfig{{Name: "home", ClientSecret: "sec", ClientSecretEnv: "X"}}
+				c.GCPProjectID = "test-project"
+				c.Apps = []AppConfig{{Name: "home", OAuthClientSecret: "sec", ClientSecretEnv: "X"}}
 			},
 			wantErr: true,
 		},
@@ -207,11 +205,10 @@ func TestValidate_Production(t *testing.T) {
 			name: "all required set",
 			setup: func(c *Config) {
 				c.Environment = "production"
-				c.SessionSecret = "a]3HQkw@&C!z9yV^BkW#nX2$pL8rJ5mA"
+				c.CookieEncryptionKey = "a]3HQkw@&C!z9yV^BkW#nX2$pL8rJ5mA"
 				c.CSRFSecret = "b]3HQkw@&C!z9yV^BkW#nX2$pL8rJ5mB"
-				c.EncryptionKey = "key"
-				c.BackupCodeHMACKey = "key"
-				c.Apps = []AppConfig{{Name: "home", ClientSecret: "sec", ClientSecretEnv: "X"}}
+				c.GCPProjectID = "test-project"
+				c.Apps = []AppConfig{{Name: "home", OAuthClientSecret: "sec", ClientSecretEnv: "X"}}
 			},
 			wantErr: false,
 		},
@@ -219,11 +216,10 @@ func TestValidate_Production(t *testing.T) {
 			name: "missing app client secret in production",
 			setup: func(c *Config) {
 				c.Environment = "production"
-				c.SessionSecret = "a]3HQkw@&C!z9yV^BkW#nX2$pL8rJ5mA"
+				c.CookieEncryptionKey = "a]3HQkw@&C!z9yV^BkW#nX2$pL8rJ5mA"
 				c.CSRFSecret = "b]3HQkw@&C!z9yV^BkW#nX2$pL8rJ5mB"
-				c.EncryptionKey = "key"
-				c.BackupCodeHMACKey = "key"
-				c.Apps = []AppConfig{{Name: "home", ClientSecret: "", ClientSecretEnv: "MISSING_ENV"}}
+				c.GCPProjectID = "test-project"
+				c.Apps = []AppConfig{{Name: "home", OAuthClientSecret: "", ClientSecretEnv: "MISSING_ENV"}}
 			},
 			wantErr: true,
 		},
@@ -293,6 +289,15 @@ func TestAllAllowedOrigins(t *testing.T) {
 	origins := cfg.AllAllowedOrigins()
 	if len(origins) != 3 {
 		t.Errorf("got %d origins, want 3 (deduped)", len(origins))
+	}
+}
+
+func TestGIPIssuerURL(t *testing.T) {
+	cfg := &Config{GCPProjectID: "my-project"}
+
+	url := cfg.GIPIssuerURL("staff")
+	if url != "https://securetoken.google.com/my-project" {
+		t.Errorf("GIPIssuerURL() = %q", url)
 	}
 }
 
