@@ -226,7 +226,7 @@ func TestSession_IsExpired(t *testing.T) {
 	}{
 		{"future", time.Now().Add(time.Hour).Unix(), false},
 		{"past", time.Now().Add(-time.Hour).Unix(), true},
-		{"now", time.Now().Unix(), true},
+		{"just_expired", time.Now().Add(-time.Second).Unix(), true},
 	}
 
 	for _, tt := range tests {

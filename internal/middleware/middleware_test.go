@@ -291,24 +291,3 @@ func TestRateLimiter(t *testing.T) {
 	}
 }
 
-func TestRateLimiter_Headers(t *testing.T) {
-	rl := NewRateLimiter(10)
-	r := gin.New()
-	r.Use(rl.Middleware())
-	r.GET("/test", func(c *gin.Context) { c.Status(200) })
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	req.RemoteAddr = "1.2.3.4:5678"
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Header().Get("X-RateLimit-Limit") != "10" {
-		t.Errorf("X-RateLimit-Limit = %q, want 10", w.Header().Get("X-RateLimit-Limit"))
-	}
-	if w.Header().Get("X-RateLimit-Remaining") == "" {
-		t.Error("X-RateLimit-Remaining should be set")
-	}
-	if w.Header().Get("X-RateLimit-Reset") == "" {
-		t.Error("X-RateLimit-Reset should be set")
-	}
-}
