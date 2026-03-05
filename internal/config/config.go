@@ -67,6 +67,7 @@ type AppConfig struct {
 	PostLogoutURL  string   `yaml:"postLogoutUrl" json:"postLogoutUrl"`
 	AllowedOrigins []string `yaml:"allowedOrigins" json:"allowedOrigins"`
 	AuthContext    string   `yaml:"authContext" json:"authContext"` // "staff" or "customer"
+	AllowedEmails []string `yaml:"allowedEmails" json:"-"`        // Email whitelist (empty = allow all)
 	ProductDomain  string   `yaml:"-" json:"-"`
 }
 

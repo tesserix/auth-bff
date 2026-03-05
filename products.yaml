@@ -30,6 +30,9 @@ products:
         postLoginUrl: /admin/dashboard
         postLogoutUrl: /login
         authContext: staff
+        allowedEmails:
+          - "mahesh.sangawar@gmail.com"
+          - "admtesserix@gmail.com"
         allowedOrigins:
           - "https://tesserix.app"
           - "https://www.tesserix.app"

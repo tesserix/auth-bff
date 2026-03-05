@@ -159,6 +159,22 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 		return
 	}
 
+	// Check email whitelist
+	if len(app.AllowedEmails) > 0 {
+		allowed := false
+		for _, email := range app.AllowedEmails {
+			if email == claims.Email {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			slog.Warn("auth: email not in whitelist", "email", claims.Email, "app", app.Name)
+			c.JSON(http.StatusForbidden, gin.H{"error": "ACCESS_DENIED", "message": "Your account is not authorized to access this application."})
+			return
+		}
+	}
+
 	// Create session
 	csrfToken := uuid.New().String()
 	sess := &session.Session{
