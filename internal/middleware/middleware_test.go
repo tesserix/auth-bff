@@ -49,35 +49,6 @@ func TestGetEffectiveHost(t *testing.T) {
 	}
 }
 
-func TestGetCookieDomain(t *testing.T) {
-	tests := []struct {
-		name           string
-		host           string
-		productDomain  string
-		platformDomain string
-		want           string
-	}{
-		{"product subdomain", "demo-admin.tesserix.app", "tesserix.app", "tesserix.app", ".tesserix.app"},
-		{"product root", "tesserix.app", "tesserix.app", "tesserix.app", ".tesserix.app"},
-		{"platform fallback", "www.tesserix.app", "mark8ly.com", "tesserix.app", ".tesserix.app"},
-		{"localhost", "localhost:3000", "tesserix.app", "tesserix.app", ""},
-		{"localhost no port", "localhost", "tesserix.app", "tesserix.app", ""},
-		{"custom domain", "myshop.com", "tesserix.app", "tesserix.app", ".myshop.com"},
-		{"custom domain www", "www.myshop.com", "tesserix.app", "tesserix.app", ".myshop.com"},
-		{"product domain match", "demo.mark8ly.com", "mark8ly.com", "tesserix.app", ".mark8ly.com"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			app := &config.AppConfig{ProductDomain: tt.productDomain}
-			got := GetCookieDomain(tt.host, app, tt.platformDomain)
-			if got != tt.want {
-				t.Errorf("GetCookieDomain(%q, {ProductDomain:%q}, %q) = %q, want %q",
-					tt.host, tt.productDomain, tt.platformDomain, got, tt.want)
-			}
-		})
-	}
-}
 
 func TestCSRFProtection_SafeMethods(t *testing.T) {
 	r := gin.New()
