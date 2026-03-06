@@ -4,9 +4,11 @@ WORKDIR /app
 
 RUN apk add --no-cache git ca-certificates
 
-ARG GITHUB_TOKEN
 ENV GOPRIVATE=github.com/tesserix/*
-RUN git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+RUN --mount=type=secret,id=github_token \
+    if [ -f /run/secrets/github_token ]; then \
+      git config --global url."https://$(cat /run/secrets/github_token)@github.com/".insteadOf "https://github.com/"; \
+    fi
 
 COPY go.mod go.sum ./
 RUN go mod download
