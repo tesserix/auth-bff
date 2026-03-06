@@ -1,6 +1,6 @@
 module github.com/tesserix/auth-bff
 
-go 1.25
+go 1.26
 
 require (
 	github.com/coreos/go-oidc/v3 v3.11.0
