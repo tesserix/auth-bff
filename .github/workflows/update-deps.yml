@@ -1,0 +1,17 @@
+name: Update go-shared
+
+on:
+  repository_dispatch:
+    types: [go-shared-release]
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    uses: tesserix/tesserix-infra/.github/workflows/_update-go-shared.yml@main
+    with:
+      service_name: auth-bff
+      version: ${{ github.event.client_payload.version }}
+    secrets:
+      GO_PRIVATE_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
