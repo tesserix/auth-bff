@@ -161,6 +161,17 @@ func (c *Config) IsDevelopment() bool {
 	return c.Environment == "development"
 }
 
+// IsKnownSessionCookie reports whether name is a session cookie name for any configured app.
+// Used by SessionExchange to prevent decryption of arbitrary cookie values.
+func (c *Config) IsKnownSessionCookie(name string) bool {
+	for _, app := range c.Apps {
+		if app.SessionCookie == name {
+			return true
+		}
+	}
+	return false
+}
+
 // AllAllowedOrigins returns a flat list of all allowed origins across all apps.
 func (c *Config) AllAllowedOrigins() []string {
 	seen := make(map[string]struct{})

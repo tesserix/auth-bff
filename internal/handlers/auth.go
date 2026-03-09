@@ -166,6 +166,13 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 		return
 	}
 
+	// Verify nonce to prevent replay attacks
+	if claims.Nonce != flowState.Nonce {
+		slog.Warn("auth: nonce mismatch", "user_id", claims.Subject)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "NONCE_MISMATCH"})
+		return
+	}
+
 	// Check email whitelist
 	if len(app.AllowedEmails) > 0 {
 		allowed := false
@@ -352,6 +359,7 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 	sess := &session.Session{
 		UserID:       data.UserID,
 		Email:        data.Email,
+		TenantID:     data.TenantID,
 		TenantSlug:   data.TenantSlug,
 		AuthContext:   app.AuthContext,
 		AccessToken:  data.AccessToken,

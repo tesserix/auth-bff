@@ -67,6 +67,7 @@ func (h *InternalHandler) requireServiceKey() gin.HandlerFunc {
 type exchangeCodeData struct {
 	UserID       string `json:"uid"`
 	Email        string `json:"email"`
+	TenantID     string `json:"tid"`
 	TenantSlug   string `json:"ts"`
 	AppName      string `json:"app"`
 	IDToken      string `json:"idt"`
@@ -85,6 +86,7 @@ func (h *InternalHandler) CreateExchangeCode(c *gin.Context) {
 	var req struct {
 		Email      string `json:"email" binding:"required"`
 		Password   string `json:"password" binding:"required"`
+		TenantID   string `json:"tenant_id"`
 		TenantSlug string `json:"tenant_slug" binding:"required"`
 		AppName    string `json:"app_name" binding:"required"`
 	}
@@ -128,6 +130,7 @@ func (h *InternalHandler) CreateExchangeCode(c *gin.Context) {
 	data := exchangeCodeData{
 		UserID:       result.LocalID,
 		Email:        result.Email,
+		TenantID:     req.TenantID,
 		TenantSlug:   req.TenantSlug,
 		AppName:      req.AppName,
 		IDToken:      result.IDToken,
@@ -186,6 +189,14 @@ func (h *InternalHandler) SessionExchange(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_REQUEST"})
+		return
+	}
+
+	// Validate cookie_name against the known set of session cookie names.
+	// This prevents the endpoint from being used to decrypt arbitrary cookie values.
+	if !h.cfg.IsKnownSessionCookie(req.CookieName) {
+		slog.Warn("session-exchange: unknown cookie name", "cookie_name", req.CookieName)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_COOKIE_NAME"})
 		return
 	}
 

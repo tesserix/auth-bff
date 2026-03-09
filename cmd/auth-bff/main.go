@@ -95,6 +95,7 @@ func main() {
 
 	// Auth routes
 	authGroup := router.Group("")
+	authGroup.Use(middleware.CSRFProtection())
 	authHandler := handlers.NewAuthHandler(cfg, gipClient, cookieStore, ephemeralStore, eventPublisher)
 	authHandler.RegisterRoutes(authGroup)
 
@@ -110,7 +111,7 @@ func main() {
 	directAuthHandler.RegisterRoutes(authGroup)
 
 	// MFA routes
-	mfaHandler := handlers.NewMFAHandler(cfg, cookieStore, ephemeralStore, tenantClient)
+	mfaHandler := handlers.NewMFAHandler(cfg, cookieStore, ephemeralStore, tenantClient, eventPublisher)
 	mfaHandler.RegisterRoutes(authGroup)
 
 	// Internal endpoints (service-to-service)

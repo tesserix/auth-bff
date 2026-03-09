@@ -42,6 +42,7 @@ type IDTokenClaims struct {
 	FamilyName    string `json:"family_name"`
 	Picture       string `json:"picture"`
 	TenantID      string `json:"firebase.tenant"` // GIP tenant ID
+	Nonce         string `json:"nonce"`           // OIDC nonce for replay protection
 }
 
 // Client manages OIDC providers for Google Identity Platform tenants.
