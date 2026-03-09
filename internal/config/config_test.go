@@ -208,6 +208,7 @@ func TestValidate_Production(t *testing.T) {
 				c.CookieEncryptionKey = "a]3HQkw@&C!z9yV^BkW#nX2$pL8rJ5mA"
 				c.CSRFSecret = "b]3HQkw@&C!z9yV^BkW#nX2$pL8rJ5mB"
 				c.GCPProjectID = "test-project"
+				c.InternalServiceKey = "test-internal-key"
 				c.Apps = []AppConfig{{Name: "home", OAuthClientSecret: "sec", ClientSecretEnv: "X"}}
 			},
 			wantErr: false,

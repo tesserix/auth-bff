@@ -39,7 +39,9 @@ type Config struct {
 	WebAuthnRPName string
 
 	// External services (Cloud Run, auto-authenticated via OIDC)
-	TenantServiceURL string
+	TenantServiceURL          string
+	VerificationServiceURL    string
+	VerificationServiceAPIKey string
 
 	// Internal service auth (for service-to-service calls TO this BFF)
 	InternalServiceKey string
@@ -95,7 +97,9 @@ func Load() (*Config, error) {
 		WebAuthnRPID:   getEnv("WEBAUTHN_RP_ID", "tesserix.app"),
 		WebAuthnRPName: getEnv("WEBAUTHN_RP_NAME", "Tesserix"),
 
-		TenantServiceURL: getEnv("TENANT_SERVICE_URL", "http://localhost:8091"),
+		TenantServiceURL:          getEnv("TENANT_SERVICE_URL", "http://localhost:8091"),
+		VerificationServiceURL:    getEnv("VERIFICATION_SERVICE_URL", ""),
+		VerificationServiceAPIKey: os.Getenv("VERIFICATION_SERVICE_API_KEY"),
 
 		InternalServiceKey: os.Getenv("INTERNAL_SERVICE_KEY"),
 

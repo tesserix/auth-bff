@@ -98,6 +98,17 @@ func main() {
 	authHandler := handlers.NewAuthHandler(cfg, gipClient, cookieStore, ephemeralStore, eventPublisher)
 	authHandler.RegisterRoutes(authGroup)
 
+	// Verification client (optional — email OTP for MFA)
+	var verificationClient *clients.VerificationClient
+	if cfg.VerificationServiceURL != "" {
+		verificationClient = clients.NewVerificationClient(cfg.VerificationServiceURL, cfg.VerificationServiceAPIKey)
+		slog.Info("verification client initialized", "url", cfg.VerificationServiceURL)
+	}
+
+	// Direct auth routes (email/password login without OIDC redirect)
+	directAuthHandler := handlers.NewDirectAuthHandler(cfg, cookieStore, ephemeralStore, eventPublisher, tenantClient, verificationClient)
+	directAuthHandler.RegisterRoutes(authGroup)
+
 	// MFA routes
 	mfaHandler := handlers.NewMFAHandler(cfg, cookieStore, ephemeralStore, tenantClient)
 	mfaHandler.RegisterRoutes(authGroup)
