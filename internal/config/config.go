@@ -76,7 +76,7 @@ type AppConfig struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		Port:        getEnv("PORT", "8080"),
-		Environment: getEnv("APP_ENV", "development"),
+		Environment: getEnv("ENVIRONMENT", "development"),
 		ServiceName: "auth-bff",
 
 		GCPProjectID: getEnv("GCP_PROJECT_ID", ""),
@@ -84,7 +84,7 @@ func Load() (*Config, error) {
 
 		CookieEncryptionKey: os.Getenv("COOKIE_ENCRYPTION_KEY"),
 		SessionMaxAge:       getEnvAsDuration("SESSION_MAX_AGE", 24*time.Hour),
-		CookieSecure:        getEnv("APP_ENV", "development") == "production",
+		CookieSecure:        getEnv("ENVIRONMENT", "development") == "production",
 
 		CSRFSecret: os.Getenv("CSRF_SECRET"),
 
@@ -147,10 +147,7 @@ func (c *Config) Validate() error {
 }
 
 // GIPIssuerURL returns the OIDC issuer URL for a GIP tenant.
-func (c *Config) GIPIssuerURL(gipTenantID string) string {
-	if gipTenantID == "" {
-		return fmt.Sprintf("https://securetoken.google.com/%s", c.GCPProjectID)
-	}
+func (c *Config) GIPIssuerURL() string {
 	return fmt.Sprintf("https://securetoken.google.com/%s", c.GCPProjectID)
 }
 

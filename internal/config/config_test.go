@@ -296,7 +296,7 @@ func TestAllAllowedOrigins(t *testing.T) {
 func TestGIPIssuerURL(t *testing.T) {
 	cfg := &Config{GCPProjectID: "my-project"}
 
-	url := cfg.GIPIssuerURL("staff")
+	url := cfg.GIPIssuerURL()
 	if url != "https://securetoken.google.com/my-project" {
 		t.Errorf("GIPIssuerURL() = %q", url)
 	}

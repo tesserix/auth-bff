@@ -106,9 +106,23 @@ func (h *MFAHandler) TOTPVerifySetup(c *gin.Context) {
 		EncryptedSecret string   `json:"encrypted_secret"`
 		BackupCodes     []string `json:"backup_codes"`
 	}
-	json.Unmarshal(data, &setup)
+	if err := json.Unmarshal(data, &setup); err != nil {
+		slog.Error("mfa: unmarshal setup data", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "SETUP_FAILED"})
+		return
+	}
 
-	// TODO: Verify TOTP code against secret before enabling
+	// Decrypt TOTP secret and verify the code before enabling
+	secret, err := crypto.DecryptAESGCM(setup.EncryptedSecret, h.cfg.EncryptionKey)
+	if err != nil {
+		slog.Error("mfa: decrypt totp secret", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "SETUP_FAILED"})
+		return
+	}
+	if !crypto.ValidateTOTP(string(secret), req.Code) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_CODE"})
+		return
+	}
 
 	// Hash backup codes
 	backupHashes := make([]string, len(setup.BackupCodes))
@@ -149,9 +163,52 @@ func (h *MFAHandler) TOTPVerify(c *gin.Context) {
 		UserID   string `json:"user_id"`
 		TenantID string `json:"tenant_id"`
 	}
-	json.Unmarshal(mfaData, &mfaState)
+	if err := json.Unmarshal(mfaData, &mfaState); err != nil {
+		slog.Error("mfa: unmarshal mfa state", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL_ERROR"})
+		return
+	}
 
-	// TODO: Fetch TOTP secret from tenant-service, verify code
+	// Fetch TOTP secret from tenant-service
+	totpResp, err := h.tenantClient.GetTOTPSecret(c.Request.Context(), mfaState.UserID, mfaState.TenantID)
+	if err != nil {
+		slog.Error("mfa: fetch totp secret", "error", err, "user_id", mfaState.UserID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "VERIFY_FAILED"})
+		return
+	}
+	if !totpResp.TOTPEnabled || totpResp.TOTPSecretEncrypted == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "TOTP_NOT_ENABLED"})
+		return
+	}
+
+	// Decrypt secret and verify code
+	secret, err := crypto.DecryptAESGCM(totpResp.TOTPSecretEncrypted, h.cfg.EncryptionKey)
+	if err != nil {
+		slog.Error("mfa: decrypt totp secret", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "VERIFY_FAILED"})
+		return
+	}
+
+	// Check TOTP code first, then try backup codes
+	if !crypto.ValidateTOTP(string(secret), req.Code) {
+		// Try backup code
+		codeHash := crypto.HMACCode(req.Code, h.cfg.BackupCodeHMACKey)
+		matched := false
+		for _, hash := range totpResp.BackupCodeHashes {
+			if hash == codeHash {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "INVALID_CODE"})
+			return
+		}
+		// Consume the backup code
+		if err := h.tenantClient.ConsumeBackupCode(c.Request.Context(), mfaState.UserID, mfaState.TenantID, codeHash); err != nil {
+			slog.Error("mfa: consume backup code", "error", err)
+		}
+	}
 
 	// On success, consume MFA state and create full session
 	h.ephemeral.Delete("mfa:" + req.MFARef)

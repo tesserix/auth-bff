@@ -7,14 +7,15 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/tesserix/auth-bff/internal/config"  // used by AuthHandler
-	"github.com/tesserix/auth-bff/internal/events"   // used by AuthHandler
-	"github.com/tesserix/auth-bff/internal/gip"      // used by AuthHandler
+	"github.com/tesserix/auth-bff/internal/config"
+	"github.com/tesserix/auth-bff/internal/events"
+	"github.com/tesserix/auth-bff/internal/gip"
 	"github.com/tesserix/auth-bff/internal/middleware"
 	"github.com/tesserix/auth-bff/internal/session"
 )
@@ -71,6 +72,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	codeVerifier := generateRandom(64)
 	returnTo := c.Query("return_to")
 	if returnTo == "" {
+		returnTo = app.PostLoginURL
+	}
+
+	// Prevent open redirect — only allow relative paths or URLs matching allowed origins
+	if returnTo != "" && !isAllowedReturnURL(returnTo, app) {
 		returnTo = app.PostLoginURL
 	}
 
@@ -368,6 +374,27 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 
 	slog.Info("exchange-token: session created", "user_id", data.UserID, "app", app.Name)
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// isAllowedReturnURL validates that a return_to URL is safe (relative path or matches allowed origins).
+func isAllowedReturnURL(returnTo string, app *config.AppConfig) bool {
+	// Allow relative paths (starting with /)
+	if strings.HasPrefix(returnTo, "/") && !strings.HasPrefix(returnTo, "//") {
+		return true
+	}
+	// Check against allowed origins
+	for _, origin := range app.AllowedOrigins {
+		if strings.HasPrefix(returnTo, origin) {
+			return true
+		}
+	}
+	// Check against app hosts
+	for _, host := range app.Hosts {
+		if strings.HasPrefix(returnTo, "https://"+host) {
+			return true
+		}
+	}
+	return false
 }
 
 func generateRandom(length int) string {

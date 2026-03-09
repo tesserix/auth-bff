@@ -73,8 +73,8 @@ func NewClient(ctx context.Context, cfg *config.Config) (*Client, error) {
 		}
 		seen[key] = true
 
-		// Google's standard OIDC issuer
-		oidcProv, err := gooidc.NewProvider(ctx, "https://accounts.google.com")
+		// GIP/Firebase OIDC issuer — tokens are issued by securetoken.google.com/{projectID}
+		oidcProv, err := gooidc.NewProvider(ctx, fmt.Sprintf("https://securetoken.google.com/%s", cfg.GCPProjectID))
 		if err != nil {
 			return nil, fmt.Errorf("gip: init oidc provider for %s: %w", key, err)
 		}
@@ -231,7 +231,8 @@ func (c *Client) SignInWithPassword(ctx context.Context, apiKey, gipTenantID, em
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("gip: signin request failed: %w", err)
 	}

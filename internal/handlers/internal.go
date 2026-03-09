@@ -41,10 +41,16 @@ func (h *InternalHandler) RegisterRoutes(r *gin.Engine) {
 }
 
 // requireServiceKey validates the Authorization: Bearer <key> header.
+// Fails closed in production — if the key is empty, rejects all requests.
 func (h *InternalHandler) requireServiceKey() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if h.cfg.InternalServiceKey == "" {
-			c.Next() // allow in development
+			if h.cfg.IsDevelopment() {
+				c.Next() // allow in development only
+				return
+			}
+			slog.Error("internal: INTERNAL_SERVICE_KEY is empty in non-development environment")
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "SERVICE_MISCONFIGURED"})
 			return
 		}
 

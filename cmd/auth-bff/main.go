@@ -30,7 +30,7 @@ func main() {
 
 	// Logger
 	logCfg := logger.DefaultConfig("auth-bff")
-	if os.Getenv("APP_ENV") == "development" {
+	if os.Getenv("ENVIRONMENT") == "development" {
 		logCfg.Level = logger.LevelDebug
 	}
 	appLogger := logger.New(logCfg)
@@ -202,5 +202,10 @@ func matchOrigin(origin, pattern string) bool {
 	if !strings.HasSuffix(origin, suffix) {
 		return false
 	}
-	return len(origin) >= len(prefix)+len(suffix)
+	if len(origin) < len(prefix)+len(suffix) {
+		return false
+	}
+	// Ensure the wildcard only matches a single subdomain segment (no extra dots)
+	matched := origin[len(prefix) : len(origin)-len(suffix)]
+	return !strings.Contains(matched, ".")
 }
