@@ -29,11 +29,46 @@ func AppResolver(registry *appregistry.Registry) gin.HandlerFunc {
 		}
 
 		app := registry.Resolve(host)
+		if app == nil {
+			app = resolveAppFromTenantHeaders(c, registry, host)
+		}
 		if app != nil {
 			c.Set(ContextKeyApp, app)
 		}
 		c.Next()
 	}
+}
+
+func resolveAppFromTenantHeaders(c *gin.Context, registry *appregistry.Registry, host string) *config.AppConfig {
+	host = strings.ToLower(strings.TrimSpace(host))
+	path := strings.ToLower(strings.TrimSpace(c.Request.URL.Path))
+	if !strings.HasPrefix(path, "/auth") {
+		return nil
+	}
+
+	if tenantID := strings.TrimSpace(c.GetHeader("X-Tenant-ID")); tenantID != "" {
+		targetType := strings.ToLower(strings.TrimSpace(c.GetHeader("X-Target-Type")))
+		switch targetType {
+		case "admin", "staff":
+			return registry.ResolveByName("admin")
+		case "storefront", "customer", "store":
+			return registry.ResolveByName("storefront")
+		}
+
+		if strings.HasSuffix(host, "-admin.mark8ly.com") {
+			return registry.ResolveByName("admin")
+		}
+		if strings.HasSuffix(host, "-store.mark8ly.com") {
+			return registry.ResolveByName("storefront")
+		}
+		if strings.HasSuffix(host, ".mark8ly.com") {
+			return registry.ResolveByName("storefront")
+		}
+
+		return registry.ResolveByName("admin")
+	}
+
+	return nil
 }
 
 // SessionExtractor reads and decrypts the session from the cookie.

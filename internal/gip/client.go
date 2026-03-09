@@ -116,11 +116,6 @@ func (c *Client) AuthURL(app *config.AppConfig, state, nonce, codeVerifier, redi
 		oauth2.AccessTypeOffline, // get refresh token
 	}
 
-	// Hint GIP to show the right tenant's login screen
-	if p.gipTenantID != "" {
-		opts = append(opts, oauth2.SetAuthURLParam("hd", p.gipTenantID))
-	}
-
 	return cfg.AuthCodeURL(state, opts...), nil
 }
 

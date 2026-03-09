@@ -2,11 +2,19 @@
 # Loaded from PRODUCTS_CONFIG_PATH env var.
 # Secrets are referenced by env var name (clientSecretEnv) — never inline.
 #
-# Auth isolation:
-#   - gipTenantId: Google Identity Platform tenant (like Keycloak realms)
-#     - "staff" tenant: platform admins, marketplace staff
-#     - "customer" tenant: storefront end-users
-#   - Roles within each tenant are managed by OpenFGA
+# Auth isolation — per-product GIP tenants:
+#   Each product gets its own GIP tenant(s) for user pool isolation.
+#   This prevents email collisions across products and limits blast radius.
+#   GIP tenants are free (cost is per-MAU, not per-tenant).
+#
+#   Tenant naming:
+#     platform     → Tesserix Home super-admins
+#     mp-internal  → Marketplace staff/admins
+#     mp-customer  → Marketplace storefront end-users
+#     fz-internal  → Fanzone staff (future)
+#     fz-customer  → Fanzone attendees (future)
+#
+#   Roles within each tenant are managed by OpenFGA, not GIP.
 
 platformDomain: tesserix.app
 
@@ -22,7 +30,7 @@ products:
           - "localhost:3002"
           - "auth-bff-e737nq7avq-el.a.run.app"
           - "tesserix-home-e737nq7avq-el.a.run.app"
-        gipTenantId: ""
+        gipTenantId: Platform-e1vyf
         oauthClientId: "677812215720-3q9j7rjt8op266ih0l9qlc5bg0jckeer.apps.googleusercontent.com"
         clientSecretEnv: PLATFORM_CLIENT_SECRET
         sessionCookie: bff_home_session
@@ -42,40 +50,57 @@ products:
           - "https://auth-bff-e737nq7avq-el.a.run.app"
           - "https://tesserix-home-e737nq7avq-el.a.run.app"
 
-  # Phase 2 — uncomment when migrating marketplace
-  # - name: marketplace
-  #   domain: mark8ly.com
-  #   apps:
-  #     - name: admin
-  #       hosts: ["*-admin.mark8ly.com", "admin.localhost", "localhost:3000"]
-  #       gipTenantId: staff           # Same GIP tenant as platform (shared staff users)
-  #       oauthClientId: mp-admin-web-client
-  #       clientSecretEnv: MARKETPLACE_ADMIN_CLIENT_SECRET
-  #       sessionCookie: bff_session
-  #       callbackPath: /auth/callback
-  #       postLoginUrl: /
-  #       postLogoutUrl: /login
-  #       authContext: staff
-  #       allowedOrigins: ["https://*-admin.mark8ly.com", "http://localhost:3000"]
-  #     - name: storefront
-  #       hosts: ["*.mark8ly.com"]
-  #       gipTenantId: customer        # Separate GIP tenant (separate user pool)
-  #       oauthClientId: mp-storefront-web-client
-  #       clientSecretEnv: STOREFRONT_CLIENT_SECRET
-  #       sessionCookie: bff_storefront_session
-  #       callbackPath: /auth/callback
-  #       postLoginUrl: /
-  #       postLogoutUrl: /
-  #       authContext: customer
-  #       allowedOrigins: ["https://*.mark8ly.com"]
-  #     - name: onboarding
-  #       hosts: ["onboarding.mark8ly.com", "*-onboarding.mark8ly.com", "localhost:3001"]
-  #       gipTenantId: staff
-  #       oauthClientId: mp-admin-web-client
-  #       clientSecretEnv: MARKETPLACE_ADMIN_CLIENT_SECRET
-  #       sessionCookie: bff_session
-  #       callbackPath: /auth/callback
-  #       postLoginUrl: /
-  #       postLogoutUrl: /login
-  #       authContext: staff
-  #       allowedOrigins: ["https://onboarding.mark8ly.com", "http://localhost:3001"]
+  - name: marketplace
+    domain: mark8ly.com
+    apps:
+      - name: admin
+        hosts:
+          - "*-admin.mark8ly.com"
+          - "admin.localhost"
+          - "localhost:3000"
+        gipTenantId: MP-Internal-uidfu
+        oauthClientId: mp-admin-web-client
+        clientSecretEnv: MP_ADMIN_CLIENT_SECRET
+        sessionCookie: bff_mk_admin_session
+        callbackPath: /auth/callback
+        postLoginUrl: /
+        postLogoutUrl: /login
+        authContext: staff
+        allowedOrigins:
+          - "https://*-admin.mark8ly.com"
+          - "http://localhost:3000"
+
+      - name: storefront
+        hosts:
+          - "*.mark8ly.com"
+          - "*-store.mark8ly.com"
+        gipTenantId: MP-Customer-cgob2
+        oauthClientId: mp-storefront-web-client
+        clientSecretEnv: MP_STOREFRONT_CLIENT_SECRET
+        sessionCookie: bff_mk_store_session
+        callbackPath: /auth/callback
+        postLoginUrl: /
+        postLogoutUrl: /
+        authContext: customer
+        allowedOrigins:
+          - "https://*.mark8ly.com"
+
+      - name: onboarding
+        hosts:
+          - "mark8ly.com"
+          - "www.mark8ly.com"
+          - "onboarding.mark8ly.com"
+          - "localhost:3001"
+        gipTenantId: MP-Internal-uidfu
+        oauthClientId: mp-admin-web-client
+        clientSecretEnv: MP_ADMIN_CLIENT_SECRET
+        sessionCookie: bff_mk_admin_session
+        callbackPath: /auth/callback
+        postLoginUrl: /
+        postLogoutUrl: /login
+        authContext: staff
+        allowedOrigins:
+          - "https://mark8ly.com"
+          - "https://www.mark8ly.com"
+          - "https://onboarding.mark8ly.com"
+          - "http://localhost:3001"

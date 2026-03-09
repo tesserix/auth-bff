@@ -62,7 +62,7 @@ type ValidateCredentialsRequest struct {
 type ValidateCredentialsResponse struct {
 	Valid           bool   `json:"valid"`
 	UserID          string `json:"user_id,omitempty"`
-	KeycloakUserID  string `json:"keycloak_user_id,omitempty"`
+	IDPUserID       string `json:"idp_user_id,omitempty"`
 	TenantID        string `json:"tenant_id,omitempty"`
 	TenantSlug      string `json:"tenant_slug,omitempty"`
 	Email           string `json:"email,omitempty"`
