@@ -339,16 +339,4 @@ func TestGetEnvHelpers(t *testing.T) {
 		}
 	})
 
-	t.Run("getEnvAsSlice", func(t *testing.T) {
-		os.Unsetenv("TEST_SLICE")
-		got := getEnvAsSlice("TEST_SLICE", []string{"a"})
-		if len(got) != 1 || got[0] != "a" {
-			t.Errorf("getEnvAsSlice() = %v, want [a]", got)
-		}
-		t.Setenv("TEST_SLICE", "x, y, z")
-		got = getEnvAsSlice("TEST_SLICE", nil)
-		if len(got) != 3 || got[1] != "y" {
-			t.Errorf("getEnvAsSlice() = %v, want [x y z]", got)
-		}
-	})
 }

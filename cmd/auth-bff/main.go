@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -178,17 +179,17 @@ func matchOrigin(origin, pattern string) bool {
 	if pattern == origin {
 		return true
 	}
-	if len(pattern) > 0 && pattern[0] == '*' {
+	idx := strings.IndexByte(pattern, '*')
+	if idx < 0 {
 		return false
 	}
-	if idx := len("https://"); len(pattern) > idx && pattern[idx] == '*' {
-		suffix := pattern[idx+1:]
-		if len(origin) > idx {
-			originHost := origin[idx:]
-			if len(originHost) > len(suffix) && originHost[len(originHost)-len(suffix):] == suffix {
-				return true
-			}
-		}
+	prefix := pattern[:idx]
+	suffix := pattern[idx+1:]
+	if !strings.HasPrefix(origin, prefix) {
+		return false
 	}
-	return false
+	if !strings.HasSuffix(origin, suffix) {
+		return false
+	}
+	return len(origin) >= len(prefix)+len(suffix)
 }
