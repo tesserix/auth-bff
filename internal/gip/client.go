@@ -7,10 +7,13 @@
 package gip
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -191,6 +194,83 @@ func (c *Client) VerifyIDToken(ctx context.Context, app *config.AppConfig, rawID
 	claims.Subject = idToken.Subject
 
 	return &claims, nil
+}
+
+// PasswordSignInResult holds the response from the GIP REST API signInWithPassword call.
+type PasswordSignInResult struct {
+	IDToken      string
+	RefreshToken string
+	ExpiresIn    int
+	LocalID      string // Firebase UID
+	Email        string
+}
+
+// SignInWithPassword authenticates a user via the GIP REST API using email + password.
+// This returns real idToken + refreshToken without an OIDC redirect flow.
+// Used for cross-origin session bootstrapping after onboarding account creation.
+func (c *Client) SignInWithPassword(ctx context.Context, apiKey, gipTenantID, email, password string) (*PasswordSignInResult, error) {
+	endpoint := fmt.Sprintf("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=%s", apiKey)
+
+	payload := map[string]interface{}{
+		"email":             email,
+		"password":          password,
+		"returnSecureToken": true,
+	}
+	if gipTenantID != "" {
+		payload["tenantId"] = gipTenantID
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("gip: marshal signin request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("gip: create signin request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("gip: signin request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		IDToken      string `json:"idToken"`
+		RefreshToken string `json:"refreshToken"`
+		ExpiresIn    string `json:"expiresIn"`
+		LocalID      string `json:"localId"`
+		Email        string `json:"email"`
+		Error        *struct {
+			Message string `json:"message"`
+			Code    int    `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("gip: decode signin response: %w", err)
+	}
+
+	if result.Error != nil {
+		return nil, fmt.Errorf("gip: signin failed: %s (code %d)", result.Error.Message, result.Error.Code)
+	}
+	if result.IDToken == "" {
+		return nil, fmt.Errorf("gip: signin returned no id_token")
+	}
+
+	expiresIn := 3600
+	if result.ExpiresIn != "" {
+		fmt.Sscanf(result.ExpiresIn, "%d", &expiresIn)
+	}
+
+	return &PasswordSignInResult{
+		IDToken:      result.IDToken,
+		RefreshToken: result.RefreshToken,
+		ExpiresIn:    expiresIn,
+		LocalID:      result.LocalID,
+		Email:        result.Email,
+	}, nil
 }
 
 func (c *Client) getProvider(app *config.AppConfig) (*provider, error) {

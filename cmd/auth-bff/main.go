@@ -103,7 +103,7 @@ func main() {
 	mfaHandler.RegisterRoutes(authGroup)
 
 	// Internal endpoints (service-to-service)
-	internalHandler := handlers.NewInternalHandler(cfg, gipClient, cookieStore)
+	internalHandler := handlers.NewInternalHandler(cfg, gipClient, cookieStore, ephemeralStore)
 	internalHandler.RegisterRoutes(router)
 
 	// HTTP server

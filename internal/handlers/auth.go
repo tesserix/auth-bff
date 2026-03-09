@@ -12,9 +12,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/tesserix/auth-bff/internal/config"
-	"github.com/tesserix/auth-bff/internal/events"
-	"github.com/tesserix/auth-bff/internal/gip"
+	"github.com/tesserix/auth-bff/internal/config"  // used by AuthHandler
+	"github.com/tesserix/auth-bff/internal/events"   // used by AuthHandler
+	"github.com/tesserix/auth-bff/internal/gip"      // used by AuthHandler
 	"github.com/tesserix/auth-bff/internal/middleware"
 	"github.com/tesserix/auth-bff/internal/session"
 )
@@ -47,6 +47,7 @@ func (h *AuthHandler) RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/auth/session", h.Session)
 	r.POST("/auth/refresh", h.Refresh)
 	r.GET("/auth/csrf-token", h.CSRFToken)
+	r.POST("/auth/exchange-token", h.ExchangeToken)
 }
 
 // authFlowState is stored in the ephemeral store during the OIDC flow.
@@ -305,6 +306,68 @@ func (h *AuthHandler) CSRFToken(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"csrfToken": sess.CSRFToken})
+}
+
+// ExchangeToken consumes a one-time exchange code (created by /internal/create-exchange-code),
+// creates a session with the stored tokens, and sets the session cookie.
+// This enables seamless cross-origin login after onboarding without re-authentication.
+func (h *AuthHandler) ExchangeToken(c *gin.Context) {
+	app := middleware.GetApp(c)
+	if app == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "UNKNOWN_APP"})
+		return
+	}
+
+	var req struct {
+		Code string `json:"code" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_REQUEST", "message": "Missing exchange code"})
+		return
+	}
+
+	// Consume the one-time code (single-use)
+	raw, ok := h.ephemeral.Consume("xcode:" + req.Code)
+	if !ok {
+		slog.Warn("exchange-token: invalid or expired code")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "INVALID_CODE", "message": "Exchange code is invalid or expired"})
+		return
+	}
+
+	var data exchangeCodeData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		slog.Error("exchange-token: unmarshal exchange data", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL_ERROR"})
+		return
+	}
+
+	// Create session with the real GIP tokens
+	csrfToken := uuid.New().String()
+	sess := &session.Session{
+		UserID:       data.UserID,
+		Email:        data.Email,
+		TenantSlug:   data.TenantSlug,
+		AuthContext:   app.AuthContext,
+		AccessToken:  data.AccessToken,
+		IDToken:      data.IDToken,
+		RefreshToken: data.RefreshToken,
+		ExpiresAt:    data.ExpiresAt,
+		CSRFToken:    csrfToken,
+		AppName:      app.Name,
+	}
+
+	host := middleware.GetEffectiveHost(c)
+	cookieDomain := middleware.GetCookieDomain(host, app, h.cfg.PlatformDomain)
+	if err := h.sessions.Save(c, app.SessionCookie, cookieDomain, sess); err != nil {
+		slog.Error("exchange-token: save session", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "SESSION_CREATE_FAILED"})
+		return
+	}
+
+	h.events.PublishLoginSuccess(c.Request.Context(), "", data.UserID, data.Email, c.ClientIP(), c.GetHeader("User-Agent"), "exchange-code")
+
+	slog.Info("exchange-token: session created", "user_id", data.UserID, "app", app.Name)
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
 func generateRandom(length int) string {
