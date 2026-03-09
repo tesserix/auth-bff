@@ -117,9 +117,10 @@ func Load() (*Config, error) {
 func (c *Config) Validate() error {
 	if c.IsProduction() {
 		required := map[string]string{
-			"COOKIE_ENCRYPTION_KEY": c.CookieEncryptionKey,
-			"CSRF_SECRET":          c.CSRFSecret,
-			"GCP_PROJECT_ID":       c.GCPProjectID,
+			"COOKIE_ENCRYPTION_KEY":  c.CookieEncryptionKey,
+			"CSRF_SECRET":           c.CSRFSecret,
+			"GCP_PROJECT_ID":        c.GCPProjectID,
+			"INTERNAL_SERVICE_KEY":  c.InternalServiceKey,
 		}
 		for name, val := range required {
 			if val == "" {
