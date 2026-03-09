@@ -59,7 +59,7 @@ products:
           - "admin.localhost"
           - "localhost:3000"
         gipTenantId: MP-Internal-uidfu
-        oauthClientId: mp-admin-web-client
+        oauthClientId: 677812215720-a8msqv3sgc67fan63fbo2puva6c6u9jm.apps.googleusercontent.com
         clientSecretEnv: MP_ADMIN_CLIENT_SECRET
         sessionCookie: bff_mk_admin_session
         callbackPath: /auth/callback
@@ -75,7 +75,7 @@ products:
           - "*.mark8ly.com"
           - "*-store.mark8ly.com"
         gipTenantId: MP-Customer-cgob2
-        oauthClientId: mp-storefront-web-client
+        oauthClientId: 677812215720-5l15v79i1fjtef0ekpuresmo2mh7hrn8.apps.googleusercontent.com
         clientSecretEnv: MP_STOREFRONT_CLIENT_SECRET
         sessionCookie: bff_mk_store_session
         callbackPath: /auth/callback
@@ -92,7 +92,7 @@ products:
           - "onboarding.mark8ly.com"
           - "localhost:3001"
         gipTenantId: MP-Internal-uidfu
-        oauthClientId: mp-admin-web-client
+        oauthClientId: 677812215720-a8msqv3sgc67fan63fbo2puva6c6u9jm.apps.googleusercontent.com
         clientSecretEnv: MP_ADMIN_CLIENT_SECRET
         sessionCookie: bff_mk_admin_session
         callbackPath: /auth/callback
