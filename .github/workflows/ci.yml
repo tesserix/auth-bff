@@ -14,6 +14,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   packages: write
@@ -41,3 +45,13 @@ jobs:
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
       GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
       DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+
+  cleanup:
+    needs: [deploy]
+    if: always() && needs.deploy.result == 'success'
+    uses: tesserix/tesserix-infra/.github/workflows/_cleanup-gar.yml@main
+    with:
+      service_name: auth-bff
+    secrets:
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
