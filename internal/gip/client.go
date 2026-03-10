@@ -53,10 +53,11 @@ type Client struct {
 }
 
 type provider struct {
-	oidcProvider *gooidc.Provider
-	verifier     *gooidc.IDTokenVerifier
-	oauth2Config *oauth2.Config
-	gipTenantID  string
+	oidcProvider   *gooidc.Provider
+	verifier       *gooidc.IDTokenVerifier // GIP/Firebase issuer (securetoken.google.com)
+	googleVerifier *gooidc.IDTokenVerifier // Google OAuth issuer (accounts.google.com)
+	oauth2Config   *oauth2.Config
+	gipTenantID    string
 }
 
 // NewClient initializes GIP OIDC providers for all configured apps.
@@ -75,14 +76,24 @@ func NewClient(ctx context.Context, cfg *config.Config) (*Client, error) {
 		seen[key] = true
 
 		// GIP/Firebase OIDC issuer — tokens are issued by securetoken.google.com/{projectID}
-		oidcProv, err := gooidc.NewProvider(ctx, fmt.Sprintf("https://securetoken.google.com/%s", cfg.GCPProjectID))
+		gipProv, err := gooidc.NewProvider(ctx, fmt.Sprintf("https://securetoken.google.com/%s", cfg.GCPProjectID))
 		if err != nil {
-			return nil, fmt.Errorf("gip: init oidc provider for %s: %w", key, err)
+			return nil, fmt.Errorf("gip: init gip oidc provider for %s: %w", key, err)
+		}
+
+		// Google OAuth OIDC issuer — tokens from the authorization code flow are
+		// issued by accounts.google.com (not by GIP/securetoken).
+		googleProv, err := gooidc.NewProvider(ctx, "https://accounts.google.com")
+		if err != nil {
+			return nil, fmt.Errorf("gip: init google oidc provider for %s: %w", key, err)
 		}
 
 		p := &provider{
-			oidcProvider: oidcProv,
-			verifier: oidcProv.Verifier(&gooidc.Config{
+			oidcProvider: gipProv,
+			verifier: gipProv.Verifier(&gooidc.Config{
+				ClientID: app.OAuthClientID,
+			}),
+			googleVerifier: googleProv.Verifier(&gooidc.Config{
 				ClientID: app.OAuthClientID,
 			}),
 			oauth2Config: &oauth2.Config{
@@ -176,16 +187,23 @@ func (c *Client) Refresh(ctx context.Context, app *config.AppConfig, refreshToke
 	}, nil
 }
 
-// VerifyIDToken verifies a GIP/Firebase ID token and extracts claims.
+// VerifyIDToken verifies an ID token and extracts claims.
+// Tries the Google OAuth verifier first (for tokens from the authorization code flow),
+// then falls back to the GIP/Firebase verifier (for tokens from the Firebase Auth SDK).
 func (c *Client) VerifyIDToken(ctx context.Context, app *config.AppConfig, rawIDToken string) (*IDTokenClaims, error) {
 	p, err := c.getProvider(app)
 	if err != nil {
 		return nil, err
 	}
 
-	idToken, err := p.verifier.Verify(ctx, rawIDToken)
+	// Try Google OAuth issuer first (accounts.google.com)
+	idToken, err := p.googleVerifier.Verify(ctx, rawIDToken)
 	if err != nil {
-		return nil, fmt.Errorf("gip: verify id token: %w", err)
+		// Fall back to GIP/Firebase issuer (securetoken.google.com)
+		idToken, err = p.verifier.Verify(ctx, rawIDToken)
+		if err != nil {
+			return nil, fmt.Errorf("gip: verify id token: %w", err)
+		}
 	}
 
 	var claims IDTokenClaims
