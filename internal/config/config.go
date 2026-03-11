@@ -69,6 +69,7 @@ type AppConfig struct {
 	AllowedOrigins []string `yaml:"allowedOrigins" json:"allowedOrigins"`
 	AuthContext    string   `yaml:"authContext" json:"authContext"` // "staff" or "customer"
 	AllowedEmails []string `yaml:"allowedEmails" json:"-"`        // Email whitelist (empty = allow all)
+	CallbackHost  string   `yaml:"callbackHost" json:"callbackHost"` // Fixed callback host for OAuth redirect URI (avoids per-tenant URI registration)
 	ProductDomain  string   `yaml:"-" json:"-"`
 }
 

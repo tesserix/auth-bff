@@ -73,6 +73,9 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	codeVerifier := generateRandom(64)
 	returnTo := c.Query("return_to")
 	if returnTo == "" {
+		returnTo = c.Query("returnTo") // Also accept camelCase from frontend
+	}
+	if returnTo == "" {
 		returnTo = app.PostLoginURL
 	}
 
@@ -81,11 +84,21 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		returnTo = app.PostLoginURL
 	}
 
-	// Build callback URL
-	host := middleware.GetEffectiveHost(c)
 	scheme := "https"
 	if h.cfg.IsDevelopment() {
 		scheme = "http"
+	}
+
+	// When callbackHost is set, the callback will arrive at a different host
+	// than the original request. Make returnTo absolute so the post-auth redirect
+	// goes back to the correct tenant subdomain.
+	originalHost := middleware.GetEffectiveHost(c)
+	host := app.CallbackHost
+	if host == "" {
+		host = originalHost
+	} else if strings.HasPrefix(returnTo, "/") {
+		// returnTo is relative — make it absolute using the original tenant host
+		returnTo = fmt.Sprintf("%s://%s%s", scheme, originalHost, returnTo)
 	}
 	redirectURI := fmt.Sprintf("%s://%s%s", scheme, host, app.CallbackPath)
 
@@ -111,12 +124,6 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 // Callback handles the OIDC callback after user authentication.
 func (h *AuthHandler) Callback(c *gin.Context) {
-	app := middleware.GetApp(c)
-	if app == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "UNKNOWN_APP"})
-		return
-	}
-
 	code := c.Query("code")
 	state := c.Query("state")
 
@@ -143,8 +150,22 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 		return
 	}
 
+	// Resolve app config — prefer flow state's AppName (needed when callbackHost
+	// routes the callback to a different host than the original app's host).
+	app := middleware.GetAppByName(c, flowState.AppName)
+	if app == nil {
+		app = middleware.GetApp(c)
+	}
+	if app == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "UNKNOWN_APP"})
+		return
+	}
+
 	// Build redirect URI (must match what was sent to /authorize)
-	host := middleware.GetEffectiveHost(c)
+	host := app.CallbackHost
+	if host == "" {
+		host = middleware.GetEffectiveHost(c)
+	}
 	scheme := "https"
 	if h.cfg.IsDevelopment() {
 		scheme = "http"
@@ -391,19 +412,40 @@ func isAllowedReturnURL(returnTo string, app *config.AppConfig) bool {
 	if strings.HasPrefix(returnTo, "/") && !strings.HasPrefix(returnTo, "//") {
 		return true
 	}
-	// Check against allowed origins
+	// Check against allowed origins (supports wildcard patterns like "https://*-admin.mark8ly.com")
 	for _, origin := range app.AllowedOrigins {
-		if strings.HasPrefix(returnTo, origin) {
+		if matchOriginPattern(returnTo, origin) {
 			return true
 		}
 	}
-	// Check against app hosts
+	// Check against app hosts (supports wildcard patterns like "*-admin.mark8ly.com")
 	for _, host := range app.Hosts {
-		if strings.HasPrefix(returnTo, "https://"+host) {
+		if matchOriginPattern(returnTo, "https://"+host) {
 			return true
 		}
 	}
 	return false
+}
+
+// matchOriginPattern checks if url starts with origin, supporting wildcard (*) prefix.
+// e.g., matchOriginPattern("https://demo-admin.mark8ly.com/foo", "https://*-admin.mark8ly.com") = true
+func matchOriginPattern(url, pattern string) bool {
+	if !strings.Contains(pattern, "*") {
+		return strings.HasPrefix(url, pattern)
+	}
+	// Split pattern at "*" — e.g., "https://" and "-admin.mark8ly.com"
+	parts := strings.SplitN(pattern, "*", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	prefix, suffix := parts[0], parts[1]
+	if !strings.HasPrefix(url, prefix) {
+		return false
+	}
+	// Find where the suffix starts in the remaining URL
+	remaining := url[len(prefix):]
+	idx := strings.Index(remaining, suffix)
+	return idx >= 0
 }
 
 func generateRandom(length int) string {

@@ -2,7 +2,9 @@ package clients
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/tesserix/go-shared/serviceclient"
 )
@@ -84,12 +86,57 @@ type ValidateCredentialsResponse struct {
 }
 
 // ValidateCredentials validates user credentials via tenant-service.
+// tenant-service wraps success responses under {"data": ...} via SuccessResponse(),
+// but returns failure responses (401) as flat JSON. serviceclient treats 4xx as errors,
+// so we need to handle both paths:
+//   - 200 success: parse wrapper, extract from "data"
+//   - 401 failure: serviceclient returns error containing the JSON body
 func (c *TenantClient) ValidateCredentials(ctx context.Context, req *ValidateCredentialsRequest) (*ValidateCredentialsResponse, error) {
-	var resp ValidateCredentialsResponse
-	if err := c.client.Post(ctx, "/api/v1/auth/validate-credentials", req, &resp); err != nil {
+	var wrapper struct {
+		Success bool                        `json:"success"`
+		Data    *ValidateCredentialsResponse `json:"data"`
+	}
+	err := c.client.Post(ctx, "/api/v1/auth/validate-credentials", req, &wrapper)
+	if err != nil {
+		// serviceclient returns error for 4xx — parse the JSON body from the error message
+		// to extract structured failure info (account_locked, error_code, etc.)
+		// tenant-service failure response uses "error_code" and "message" field names,
+		// which differ from auth-bff's "error" and "error_message" — map them here.
+		errStr := err.Error()
+		if idx := strings.Index(errStr, "{"); idx >= 0 {
+			jsonBody := errStr[idx:]
+			var raw struct {
+				Valid            bool   `json:"valid"`
+				ErrorCode        string `json:"error_code"`
+				Message          string `json:"message"`
+				AccountLocked    bool   `json:"account_locked"`
+				LockedUntil      string `json:"locked_until"`
+				RemainingAttempts int   `json:"remaining_attempts"`
+				TenantID         string `json:"tenant_id"`
+				TenantSlug       string `json:"tenant_slug"`
+			}
+			if jsonErr := json.Unmarshal([]byte(jsonBody), &raw); jsonErr == nil && raw.ErrorCode != "" {
+				return &ValidateCredentialsResponse{
+					Valid:         raw.Valid,
+					Error:         raw.ErrorCode,
+					ErrorMessage:  raw.Message,
+					AccountLocked: raw.AccountLocked,
+					LockedUntil:   raw.LockedUntil,
+					TenantID:      raw.TenantID,
+					TenantSlug:    raw.TenantSlug,
+				}, nil
+			}
+		}
 		return nil, err
 	}
-	return &resp, nil
+
+	// Success: unwrap from "data" envelope
+	if wrapper.Data != nil {
+		return wrapper.Data, nil
+	}
+
+	// Fallback: if "data" is nil but response was 200, return empty invalid response
+	return &ValidateCredentialsResponse{Valid: false, Error: "EMPTY_RESPONSE"}, nil
 }
 
 // RegisterCustomerRequest is the request for customer registration.

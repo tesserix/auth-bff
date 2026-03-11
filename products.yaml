@@ -63,6 +63,7 @@ products:
         clientSecretEnv: MP_ADMIN_CLIENT_SECRET
         sessionCookie: bff_mk_admin_session
         callbackPath: /auth/callback
+        callbackHost: mark8ly.com  # Single callback host — avoids per-tenant OAuth redirect URI registration
         postLoginUrl: /
         postLogoutUrl: /login
         authContext: staff
