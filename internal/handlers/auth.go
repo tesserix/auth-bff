@@ -45,6 +45,7 @@ func (h *AuthHandler) RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/auth/login", h.Login)
 	r.GET("/auth/callback", h.Callback)
 	r.POST("/auth/logout", h.Logout)
+	r.GET("/auth/logout", h.Logout)
 	r.GET("/auth/session", h.Session)
 	r.POST("/auth/refresh", h.Refresh)
 	r.GET("/auth/csrf-token", h.CSRFToken)
