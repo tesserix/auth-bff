@@ -211,12 +211,23 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 		}
 	}
 
+	// Extract tenant slug from the return URL or original host.
+	// The returnTo URL contains the original tenant subdomain (e.g., https://demo-store-admin.mark8ly.com/...)
+	// because the Login handler makes it absolute when callbackHost is set.
+	tenantSlug := extractTenantSlugFromURL(flowState.ReturnTo, app.ProductDomain)
+	tenantID := claims.TenantID
+	// Also check X-Tenant-ID header set by Cloudflare Worker
+	if tenantID == "" {
+		tenantID = c.GetHeader("X-Tenant-ID")
+	}
+
 	// Create session
 	csrfToken := uuid.New().String()
 	sess := &session.Session{
 		UserID:       claims.Subject,
 		Email:        claims.Email,
-		TenantID:     claims.TenantID,
+		TenantID:     tenantID,
+		TenantSlug:   tenantSlug,
 		AuthContext:   app.AuthContext,
 		AccessToken:  tokens.AccessToken,
 		IDToken:      tokens.IDToken,
@@ -446,6 +457,36 @@ func matchOriginPattern(url, pattern string) bool {
 	remaining := url[len(prefix):]
 	idx := strings.Index(remaining, suffix)
 	return idx >= 0
+}
+
+// extractTenantSlugFromURL extracts tenant slug from a URL with pattern {tenant}-admin.{domain}.
+// e.g., "https://demo-store-admin.mark8ly.com/dashboard" → "demo-store"
+func extractTenantSlugFromURL(rawURL, platformDomain string) string {
+	if rawURL == "" || platformDomain == "" {
+		return ""
+	}
+	// Extract host from URL
+	host := rawURL
+	if idx := strings.Index(host, "://"); idx != -1 {
+		host = host[idx+3:]
+	}
+	if idx := strings.IndexByte(host, '/'); idx != -1 {
+		host = host[:idx]
+	}
+	if idx := strings.IndexByte(host, ':'); idx != -1 {
+		host = host[:idx]
+	}
+	host = strings.ToLower(host)
+
+	// Match pattern: {slug}-admin.{platformDomain}
+	suffix := "-admin." + strings.ToLower(platformDomain)
+	if strings.HasSuffix(host, suffix) {
+		slug := host[:len(host)-len(suffix)]
+		if slug != "" {
+			return slug
+		}
+	}
+	return ""
 }
 
 func generateRandom(length int) string {

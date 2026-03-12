@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -200,13 +201,26 @@ func (h *InternalHandler) SessionExchange(c *gin.Context) {
 		return
 	}
 
-	sess, err := h.sessions.LoadFromValue(req.CookieValue)
+	// Strip surrounding double quotes if present — Go's http.Cookie reader
+	// strips them automatically, but clients extracting from the raw Cookie
+	// header may include them.
+	cookieValue := strings.TrimPrefix(strings.TrimSuffix(req.CookieValue, "\""), "\"")
+
+	sess, err := h.sessions.LoadFromValue(cookieValue)
 	if err != nil {
+		slog.Warn("session-exchange: decrypt failed",
+			"error", err,
+			"cookie_name", req.CookieName,
+			"cookie_len", len(cookieValue),
+			"raw_len", len(req.CookieValue),
+			"starts_with_quote", strings.HasPrefix(req.CookieValue, "\""),
+		)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "INVALID_SESSION"})
 		return
 	}
 
 	if sess.IsExpired() {
+		slog.Info("session-exchange: token expired", "user_id", sess.UserID, "expires_at", sess.ExpiresAt)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "SESSION_EXPIRED"})
 		return
 	}

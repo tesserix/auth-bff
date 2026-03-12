@@ -34,15 +34,22 @@ type TokenSet struct {
 
 // IDTokenClaims holds verified claims from a GIP ID token.
 type IDTokenClaims struct {
-	Subject       string `json:"sub"`
-	Email         string `json:"email"`
-	EmailVerified bool   `json:"email_verified"`
-	Name          string `json:"name"`
-	GivenName     string `json:"given_name"`
-	FamilyName    string `json:"family_name"`
-	Picture       string `json:"picture"`
-	TenantID      string `json:"firebase.tenant"` // GIP tenant ID
-	Nonce         string `json:"nonce"`           // OIDC nonce for replay protection
+	Subject       string         `json:"sub"`
+	Email         string         `json:"email"`
+	EmailVerified bool           `json:"email_verified"`
+	Name          string         `json:"name"`
+	GivenName     string         `json:"given_name"`
+	FamilyName    string         `json:"family_name"`
+	Picture       string         `json:"picture"`
+	Firebase      *firebaseClaim `json:"firebase"` // nested GIP metadata
+	TenantID      string         `json:"-"`         // populated from Firebase.Tenant after decode
+	Nonce         string         `json:"nonce"`     // OIDC nonce for replay protection
+}
+
+// firebaseClaim represents the nested "firebase" claim in GIP/Firebase ID tokens.
+type firebaseClaim struct {
+	Tenant         string `json:"tenant"`
+	SignInProvider string `json:"sign_in_provider"`
 }
 
 // Client manages OIDC providers for Google Identity Platform tenants.
@@ -211,6 +218,10 @@ func (c *Client) VerifyIDToken(ctx context.Context, app *config.AppConfig, rawID
 		return nil, fmt.Errorf("gip: extract claims: %w", err)
 	}
 	claims.Subject = idToken.Subject
+	// Populate TenantID from nested firebase.tenant claim
+	if claims.Firebase != nil && claims.Firebase.Tenant != "" {
+		claims.TenantID = claims.Firebase.Tenant
+	}
 
 	return &claims, nil
 }

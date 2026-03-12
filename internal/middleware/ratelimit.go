@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,8 +34,15 @@ func NewRateLimiter(requestsPerMinute int) *RateLimiter {
 }
 
 // Middleware returns a Gin middleware that rate-limits by client IP.
+// Internal service-to-service paths are exempt from rate limiting.
 func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Skip rate limiting for internal service-to-service calls
+		if strings.HasPrefix(c.Request.URL.Path, "/internal/") {
+			c.Next()
+			return
+		}
+
 		ip := clientIP(c)
 		allowed, remaining, resetAt := rl.allow(ip)
 
