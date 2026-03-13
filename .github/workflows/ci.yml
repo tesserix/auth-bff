@@ -4,11 +4,10 @@ on:
   push:
     branches: [main, 'feat/**', 'feature/**', 'bugfix/**', 'hotfix/**']
     paths:
-      - 'cmd/**'
-      - 'internal/**'
-      - 'Dockerfile'
+      - '**/*.go'
       - 'go.mod'
       - 'go.sum'
+      - 'Dockerfile'
       - '.github/workflows/ci.yml'
   pull_request:
     branches: [main]
@@ -18,40 +17,105 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  GAR_REGISTRY: asia-south1-docker.pkg.dev
+  GAR_REPOSITORY: tesserix/services
+  IMAGE_NAME: auth-bff
+
 permissions:
   contents: read
-  packages: write
   security-events: write
   id-token: write
 
 jobs:
-  build:
-    uses: tesserix/tesserix-infra/.github/workflows/_build-go.yml@main
-    with:
-      service_name: auth-bff
-    secrets:
-      GO_PRIVATE_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
-      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
 
-  deploy:
-    needs: [build]
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    uses: tesserix/tesserix-infra/.github/workflows/_deploy-cloudrun.yml@main
-    with:
-      service_name: auth-bff
-      image: ${{ needs.build.outputs.image }}
-    secrets:
-      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-      DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Run tests
+        env:
+          GOPRIVATE: github.com/tesserix/*
+        run: |
+          go vet ./...
+          go test -race -coverprofile=coverage.out ./...
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.CI_SERVICE_ACCOUNT }}
+
+      - name: Configure Docker for GAR
+        run: gcloud auth configure-docker ${{ env.GAR_REGISTRY }} --quiet
+
+      - name: Extract metadata
+        id: meta
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=main-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push
+        run: |
+          docker build \
+            --secret id=github_token,env=GITHUB_TOKEN \
+            --platform linux/amd64 \
+            -t ${{ env.GAR_REGISTRY }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }} \
+            -t ${{ env.GAR_REGISTRY }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest \
+            .
+          docker push --all-tags ${{ env.GAR_REGISTRY }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GO_PRIVATE_TOKEN }}
+
+      - name: Security scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.GAR_REGISTRY }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+
+      - name: Upload scan results
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
 
   cleanup:
-    needs: [deploy]
-    if: always() && needs.deploy.result == 'success'
-    uses: tesserix/tesserix-infra/.github/workflows/_cleanup-gar.yml@main
-    with:
-      service_name: auth-bff
-    secrets:
-      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.CI_SERVICE_ACCOUNT }}
+
+      - name: Keep only 5 recent images
+        run: |
+          gcloud artifacts docker images list \
+            ${{ env.GAR_REGISTRY }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }} \
+            --sort-by=~CREATE_TIME \
+            --format='value(VERSION)' \
+            | tail -n +6 \
+            | xargs -I{} gcloud artifacts docker images delete \
+                ${{ env.GAR_REGISTRY }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}@{} \
+                --quiet --delete-tags 2>/dev/null || true
+
