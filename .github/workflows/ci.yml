@@ -19,7 +19,7 @@ concurrency:
 
 env:
   GAR_REGISTRY: asia-south1-docker.pkg.dev
-  GAR_REPOSITORY: tesserix/services
+  GAR_REPOSITORY: tesserix-app/services
   IMAGE_NAME: auth-bff
 
 permissions:
@@ -118,4 +118,3 @@ jobs:
             | xargs -I{} gcloud artifacts docker images delete \
                 ${{ env.GAR_REGISTRY }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}@{} \
                 --quiet --delete-tags 2>/dev/null || true
-
