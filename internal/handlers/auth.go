@@ -216,9 +216,15 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 	// because the Login handler makes it absolute when callbackHost is set.
 	tenantSlug := extractTenantSlugFromURL(flowState.ReturnTo, app.ProductDomain)
 	tenantID := claims.TenantID
-	// Also check X-Tenant-ID header set by Cloudflare Worker
-	if tenantID == "" {
-		tenantID = c.GetHeader("X-Tenant-ID")
+	// SECURITY: Do NOT fall back to X-Tenant-ID header from the request.
+	// Tenant ID must come from verified GIP claims only. Accepting client-controlled
+	// headers here would allow cross-tenant session injection.
+
+	// Validate tenant ID and slug consistency when both are present
+	if tenantID != "" && tenantSlug != "" {
+		// Both are present — downstream services should ensure they match.
+		// Log for observability.
+		slog.Debug("auth: callback tenant context", "tenant_id", tenantID, "tenant_slug", tenantSlug, "user_id", claims.Subject)
 	}
 
 	// Create session
@@ -384,6 +390,13 @@ func (h *AuthHandler) ExchangeToken(c *gin.Context) {
 	if err := json.Unmarshal(raw, &data); err != nil {
 		slog.Error("exchange-token: unmarshal exchange data", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL_ERROR"})
+		return
+	}
+
+	// Verify token hasn't expired
+	if time.Now().Unix() > data.ExpiresAt {
+		slog.Warn("exchange-token: token expired", "user_id", data.UserID, "expired_at", data.ExpiresAt)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "EXCHANGE_CODE_EXPIRED", "message": "Exchange code tokens have expired"})
 		return
 	}
 

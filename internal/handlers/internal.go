@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -17,6 +19,17 @@ import (
 	"github.com/tesserix/auth-bff/internal/session"
 )
 
+// slugPattern validates tenant slugs: lowercase alphanumeric + hyphens, 2-63 chars.
+var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$`)
+
+// isValidSlug checks that a tenant slug contains only safe characters.
+func isValidSlug(slug string) bool {
+	if len(slug) < 2 || len(slug) > 63 {
+		return false
+	}
+	return slugPattern.MatchString(slug)
+}
+
 // InternalHandler handles service-to-service requests.
 // Other services call these endpoints to verify tokens or exchange session data.
 type InternalHandler struct {
@@ -24,17 +37,50 @@ type InternalHandler struct {
 	gip       *gip.Client
 	sessions  *session.CookieStore
 	ephemeral *session.EphemeralStore
+	// rateLimiter tracks calls per service key (simple in-memory counter)
+	rateLimiter *rateLimiter
+}
+
+// rateLimiter provides simple per-key rate limiting for internal endpoints.
+type rateLimiter struct {
+	mu       sync.Mutex
+	counters map[string]*rateCounter
+}
+
+type rateCounter struct {
+	count    int
+	windowAt time.Time
+}
+
+func newRateLimiter() *rateLimiter {
+	return &rateLimiter{counters: make(map[string]*rateCounter)}
+}
+
+// allow checks if the key is within the rate limit (60 requests per minute).
+func (rl *rateLimiter) allow(key string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	rc, ok := rl.counters[key]
+	if !ok || now.Sub(rc.windowAt) > time.Minute {
+		rl.counters[key] = &rateCounter{count: 1, windowAt: now}
+		return true
+	}
+	rc.count++
+	return rc.count <= 60
 }
 
 // NewInternalHandler creates a new InternalHandler.
 func NewInternalHandler(cfg *config.Config, gipClient *gip.Client, sessions *session.CookieStore, ephemeral *session.EphemeralStore) *InternalHandler {
-	return &InternalHandler{cfg: cfg, gip: gipClient, sessions: sessions, ephemeral: ephemeral}
+	return &InternalHandler{cfg: cfg, gip: gipClient, sessions: sessions, ephemeral: ephemeral, rateLimiter: newRateLimiter()}
 }
 
 // RegisterRoutes registers internal endpoints.
 func (h *InternalHandler) RegisterRoutes(r *gin.Engine) {
 	internal := r.Group("/internal")
 	internal.Use(h.requireServiceKey())
+	internal.Use(h.rateLimit())
 
 	internal.POST("/verify-token", h.VerifyToken)
 	internal.POST("/session-exchange", h.SessionExchange)
@@ -58,6 +104,19 @@ func (h *InternalHandler) requireServiceKey() gin.HandlerFunc {
 		token := middleware.ExtractBearerToken(c)
 		if token != h.cfg.InternalServiceKey {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "UNAUTHORIZED"})
+			return
+		}
+		c.Next()
+	}
+}
+
+// rateLimit enforces per-caller rate limiting on internal endpoints.
+func (h *InternalHandler) rateLimit() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		key := c.ClientIP() + ":" + c.Request.URL.Path
+		if !h.rateLimiter.allow(key) {
+			slog.Warn("internal: rate limit exceeded", "path", c.Request.URL.Path, "ip", c.ClientIP())
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "RATE_LIMIT_EXCEEDED"})
 			return
 		}
 		c.Next()
@@ -96,6 +155,13 @@ func (h *InternalHandler) CreateExchangeCode(c *gin.Context) {
 		return
 	}
 
+	// Validate tenant_slug format to prevent injection
+	if !isValidSlug(req.TenantSlug) {
+		slog.Warn("exchange-code: invalid tenant_slug format", "tenant_slug", req.TenantSlug)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_REQUEST", "message": "Invalid tenant slug format"})
+		return
+	}
+
 	// Resolve app config to get the GIP tenant ID
 	app := middleware.GetAppByName(c, req.AppName)
 	if app == nil {
@@ -127,6 +193,13 @@ func (h *InternalHandler) CreateExchangeCode(c *gin.Context) {
 	}
 	code := hex.EncodeToString(codeBytes)
 
+	// SECURITY: tenant_id is optional from the caller; if empty, it will be
+	// resolved downstream from the tenant_slug by the admin app's middleware.
+	// We log when tenant_id is provided for audit traceability.
+	if req.TenantID != "" {
+		slog.Info("exchange-code: tenant_id provided by caller", "tenant_id", req.TenantID, "tenant_slug", req.TenantSlug)
+	}
+
 	// Store tokens under the code (5 minute TTL, single-use via Consume)
 	data := exchangeCodeData{
 		UserID:       result.LocalID,
@@ -142,7 +215,14 @@ func (h *InternalHandler) CreateExchangeCode(c *gin.Context) {
 	encoded, _ := json.Marshal(data)
 	h.ephemeral.Set("xcode:"+code, encoded, 5*time.Minute)
 
-	slog.Info("exchange-code: created", "user_id", result.LocalID, "app", req.AppName)
+	slog.Info("exchange-code: created",
+		"user_id", result.LocalID,
+		"email", result.Email,
+		"tenant_id", req.TenantID,
+		"tenant_slug", req.TenantSlug,
+		"app", req.AppName,
+		"client_ip", c.ClientIP(),
+	)
 	c.JSON(http.StatusOK, gin.H{"code": code})
 }
 
