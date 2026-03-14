@@ -65,8 +65,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Events publisher (Pub/Sub)
-	eventPublisher := events.NewPublisher(context.Background(), cfg.GCPProjectID)
+	// Events publisher (Pub/Sub) — timeout after 10s to avoid blocking startup
+	pubCtx, pubCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	eventPublisher := events.NewPublisher(pubCtx, cfg.GCPProjectID)
+	pubCancel()
 	defer eventPublisher.Close()
 
 	// App registry
