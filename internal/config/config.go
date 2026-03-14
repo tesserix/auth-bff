@@ -68,7 +68,8 @@ type AppConfig struct {
 	PostLogoutURL  string   `yaml:"postLogoutUrl" json:"postLogoutUrl"`
 	AllowedOrigins []string `yaml:"allowedOrigins" json:"allowedOrigins"`
 	AuthContext    string   `yaml:"authContext" json:"authContext"` // "staff" or "customer"
-	AllowedEmails []string `yaml:"allowedEmails" json:"-"`        // Email whitelist (empty = allow all)
+	AllowedEmails    []string `yaml:"allowedEmails" json:"-"`       // Email whitelist (empty = allow all)
+	AllowedEmailsEnv string   `yaml:"allowedEmailsEnv" json:"-"`   // Env var name holding comma-separated allowed emails
 	CallbackHost  string   `yaml:"callbackHost" json:"callbackHost"` // Fixed callback host for OAuth redirect URI (avoids per-tenant URI registration)
 	ProductDomain  string   `yaml:"-" json:"-"`
 }

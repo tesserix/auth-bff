@@ -38,10 +38,7 @@ products:
         postLoginUrl: /admin/dashboard
         postLogoutUrl: /login
         authContext: staff
-        allowedEmails:
-          - "mahesh.sangawar@gmail.com"
-          - "admtesserix@gmail.com"
-          - "samyak.rout@gmail.com"
+        allowedEmailsEnv: PLATFORM_ALLOWED_EMAILS  # Comma-separated list in GCP Secret Manager
         allowedOrigins:
           - "https://tesserix.app"
           - "https://www.tesserix.app"

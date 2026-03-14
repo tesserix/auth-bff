@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -54,6 +55,16 @@ func (c *Config) LoadProducts() error {
 				return fmt.Errorf("products config: app %q in product %q has no clientSecretEnv", app.Name, product.Name)
 			}
 			app.OAuthClientSecret = os.Getenv(app.ClientSecretEnv)
+			// Resolve allowed emails from env var if configured
+			if app.AllowedEmailsEnv != "" {
+				if emailsStr := os.Getenv(app.AllowedEmailsEnv); emailsStr != "" {
+					for _, e := range strings.Split(emailsStr, ",") {
+						if trimmed := strings.TrimSpace(e); trimmed != "" {
+							app.AllowedEmails = append(app.AllowedEmails, trimmed)
+						}
+					}
+				}
+			}
 			app.ProductDomain = product.Domain
 			apps = append(apps, app)
 		}
