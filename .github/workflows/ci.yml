@@ -94,6 +94,8 @@ jobs:
       # --- Deploy to GKE (Knative) ---
       - name: Get GKE credentials
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.auth_gcp.outcome == 'success'
+        continue-on-error: true
+        id: gke_creds
         uses: google-github-actions/get-gke-credentials@v2
         with:
           cluster_name: ${{ env.GKE_CLUSTER }}
@@ -101,7 +103,8 @@ jobs:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
       - name: Restart Knative service
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.auth_gcp.outcome == 'success'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.gke_creds.outcome == 'success'
+        continue-on-error: true
         run: |
           kubectl patch ksvc auth-bff -n platform \
             --type merge \
