@@ -106,7 +106,7 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.gke_creds.outcome == 'success'
         continue-on-error: true
         run: |
-          kubectl patch ksvc auth-bff -n platform \
+          kubectl patch ksvc auth-bff -n tesserix \
             --type merge \
             -p "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"client.knative.dev/updateTimestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}}}}"
 
