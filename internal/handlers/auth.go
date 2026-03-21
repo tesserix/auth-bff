@@ -322,19 +322,21 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 
 	tokens, err := h.gip.Refresh(c.Request.Context(), app, sess.RefreshToken)
 	if err != nil {
-		slog.Warn("auth: refresh failed", "error", err, "user_id", sess.UserID)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "REFRESH_FAILED"})
-		return
+		slog.Warn("auth: refresh failed, extending session without token refresh", "error", err, "user_id", sess.UserID)
+		// GIP token refresh failed (e.g., deleted OAuth client, expired refresh token).
+		// Instead of killing the session, extend it — the session cookie itself is the
+		// source of truth for direct-login users who don't depend on GIP tokens.
+		sess.ExpiresAt = time.Now().Add(h.cfg.SessionMaxAge).Unix()
+	} else {
+		sess.AccessToken = tokens.AccessToken
+		if tokens.IDToken != "" {
+			sess.IDToken = tokens.IDToken
+		}
+		if tokens.RefreshToken != "" {
+			sess.RefreshToken = tokens.RefreshToken
+		}
+		sess.ExpiresAt = tokens.ExpiresAt.Unix()
 	}
-
-	sess.AccessToken = tokens.AccessToken
-	if tokens.IDToken != "" {
-		sess.IDToken = tokens.IDToken
-	}
-	if tokens.RefreshToken != "" {
-		sess.RefreshToken = tokens.RefreshToken
-	}
-	sess.ExpiresAt = tokens.ExpiresAt.Unix()
 
 	host := middleware.GetEffectiveHost(c)
 	cookieDomain := middleware.GetCookieDomain(host, app, h.cfg.PlatformDomain)

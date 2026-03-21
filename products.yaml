@@ -30,7 +30,7 @@ products:
           - "localhost:3002"
           - "auth-bff-e737nq7avq-el.a.run.app"
           - "tesserix-home-e737nq7avq-el.a.run.app"
-        gipTenantId: Platform-e1vyf
+        gipTenantId: Platform-9bu14
         oauthClientId: "677812215720-3q9j7rjt8op266ih0l9qlc5bg0jckeer.apps.googleusercontent.com"
         clientSecretEnv: PLATFORM_CLIENT_SECRET
         sessionCookie: bff_home_session
@@ -55,7 +55,7 @@ products:
           - "*-admin.mark8ly.com"
           - "admin.localhost"
           - "localhost:3000"
-        gipTenantId: MP-Internal-uidfu
+        gipTenantId: MP-Internal-z5rnh
         oauthClientId: 677812215720-a8msqv3sgc67fan63fbo2puva6c6u9jm.apps.googleusercontent.com
         clientSecretEnv: MP_ADMIN_CLIENT_SECRET
         sessionCookie: bff_mk_admin_session
@@ -72,7 +72,7 @@ products:
         hosts:
           - "*.mark8ly.com"
           - "*-store.mark8ly.com"
-        gipTenantId: MP-Customer-cgob2
+        gipTenantId: MP-Customer-39opy
         oauthClientId: 677812215720-5l15v79i1fjtef0ekpuresmo2mh7hrn8.apps.googleusercontent.com
         clientSecretEnv: MP_STOREFRONT_CLIENT_SECRET
         sessionCookie: bff_mk_store_session
@@ -89,7 +89,7 @@ products:
           - "www.mark8ly.com"
           - "onboarding.mark8ly.com"
           - "localhost:3001"
-        gipTenantId: MP-Internal-uidfu
+        gipTenantId: MP-Internal-z5rnh
         oauthClientId: 677812215720-a8msqv3sgc67fan63fbo2puva6c6u9jm.apps.googleusercontent.com
         clientSecretEnv: MP_ADMIN_CLIENT_SECRET
         sessionCookie: bff_mk_admin_session
