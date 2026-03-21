@@ -85,7 +85,7 @@ func Load() (*Config, error) {
 		GIPAPIKey:    os.Getenv("GIP_API_KEY"),
 
 		CookieEncryptionKey: os.Getenv("COOKIE_ENCRYPTION_KEY"),
-		SessionMaxAge:       getEnvAsDuration("SESSION_MAX_AGE", 24*time.Hour),
+		SessionMaxAge:       getEnvAsDuration("SESSION_MAX_AGE", 48*time.Hour),
 		CookieSecure:        getEnv("ENVIRONMENT", "development") == "production",
 
 		CSRFSecret: os.Getenv("CSRF_SECRET"),
