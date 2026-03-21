@@ -37,8 +37,13 @@ func NewRateLimiter(requestsPerMinute int) *RateLimiter {
 // Internal service-to-service paths are exempt from rate limiting.
 func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Skip rate limiting for internal service-to-service calls
-		if strings.HasPrefix(c.Request.URL.Path, "/internal/") {
+		path := c.Request.URL.Path
+		// Skip rate limiting for internal calls, session checks, and health probes
+		if strings.HasPrefix(path, "/internal/") ||
+			path == "/auth/session" ||
+			path == "/auth/csrf-token" ||
+			path == "/health" ||
+			path == "/ready" {
 			c.Next()
 			return
 		}
