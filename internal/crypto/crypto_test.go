@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -29,20 +30,9 @@ func TestEncryptDecryptAESGCM(t *testing.T) {
 				t.Fatalf("Encrypt: %v", err)
 			}
 
-			// Verify format: iv:tag:ciphertext
-			parts := strings.SplitN(encrypted, ":", 3)
-			if len(parts) != 3 {
-				t.Fatalf("expected 3 parts, got %d", len(parts))
-			}
-
-			// IV should be 24 hex chars (12 bytes)
-			if len(parts[0]) != 24 {
-				t.Errorf("IV length = %d hex chars, want 24", len(parts[0]))
-			}
-
-			// Auth tag should be 32 hex chars (16 bytes)
-			if len(parts[1]) != 32 {
-				t.Errorf("auth tag length = %d hex chars, want 32", len(parts[1]))
+			// Verify v2 format: "v2.<base64url>"
+			if !strings.HasPrefix(encrypted, "v2.") {
+				t.Fatalf("expected v2. prefix, got %q", encrypted[:10])
 			}
 
 			// Decrypt
@@ -77,6 +67,38 @@ func TestEncryptDecrypt_ShortKey(t *testing.T) {
 	}
 }
 
+func TestDecrypt_LegacyHexFormat(t *testing.T) {
+	// Build a valid legacy hex-encoded ciphertext manually
+	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	plaintext := "legacy session data"
+
+	// Encrypt using the old hex format by calling the internal helper
+	encrypted, err := encryptLegacyHex([]byte(plaintext), key)
+	if err != nil {
+		t.Fatalf("legacy encrypt: %v", err)
+	}
+
+	// Should NOT have v2. prefix
+	if strings.HasPrefix(encrypted, "v2.") {
+		t.Fatal("legacy format should not have v2. prefix")
+	}
+
+	// Verify it has the iv:tag:ct format
+	parts := strings.SplitN(encrypted, ":", 3)
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 parts, got %d", len(parts))
+	}
+
+	// DecryptAESGCM should handle legacy format
+	decrypted, err := DecryptAESGCM(encrypted, key)
+	if err != nil {
+		t.Fatalf("Decrypt legacy: %v", err)
+	}
+	if string(decrypted) != plaintext {
+		t.Errorf("decrypted = %q, want %q", string(decrypted), plaintext)
+	}
+}
+
 func TestDecrypt_InvalidFormat(t *testing.T) {
 	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
@@ -89,6 +111,7 @@ func TestDecrypt_InvalidFormat(t *testing.T) {
 		{"invalid hex iv", "zzzzzzzzzzzzzzzzzzzzzzzz:00000000000000000000000000000000:00"},
 		{"invalid hex tag", "000000000000000000000000:zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz:00"},
 		{"invalid hex ct", "000000000000000000000000:00000000000000000000000000000000:zz"},
+		{"v2 invalid base64", "v2.!!!invalid!!!"},
 	}
 
 	for _, tt := range tests {
@@ -129,6 +152,39 @@ func TestDecrypt_WrongKey(t *testing.T) {
 	_, err := DecryptAESGCM(encrypted, key2)
 	if err == nil {
 		t.Error("decryption with wrong key should fail")
+	}
+}
+
+func TestV2_CookieSizeFits(t *testing.T) {
+	key := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+	// Simulate a realistic session with JWTs (~3000 bytes total)
+	session := fmt.Sprintf(`{"uid":"sOvK4PxyTGPWz3n2xJkGbIGbXTH3","email":"user@example.com","tid":"tenant-123","ts":"my-business","ctx":"staff","at":"%s","idt":"%s","rt":"%s","exp":1774055940,"csrf":"550e8400-e29b-41d4-a716-446655440000","app":"admin","iat":1774055940}`,
+		strings.Repeat("eyJhbGciOiJSUzI1NiJ9.", 50),  // ~1100 chars access token
+		strings.Repeat("eyJhbGciOiJSUzI1NiJ9.", 40),  // ~880 chars id token
+		strings.Repeat("AMf-vBwLQICADs", 15),          // ~210 chars refresh token
+	)
+
+	encrypted, err := EncryptAESGCM([]byte(session), key)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	// Cookie value must be under 4096 bytes for browser compatibility
+	if len(encrypted) > 4096 {
+		t.Errorf("encrypted cookie value = %d bytes, exceeds 4096 limit", len(encrypted))
+	}
+
+	t.Logf("session JSON size: %d bytes", len(session))
+	t.Logf("encrypted cookie value: %d bytes (%.0f%% of 4096 limit)", len(encrypted), float64(len(encrypted))/4096*100)
+
+	// Verify roundtrip
+	decrypted, err := DecryptAESGCM(encrypted, key)
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+	if string(decrypted) != session {
+		t.Error("roundtrip failed")
 	}
 }
 
@@ -245,4 +301,9 @@ func TestHMACCode_Deterministic(t *testing.T) {
 	if h1 == h4 {
 		t.Error("different keys should produce different hashes")
 	}
+}
+
+// encryptLegacyHex produces the old hex format for backward-compat tests.
+func encryptLegacyHex(plaintext []byte, keyHex string) (string, error) {
+	return EncryptAESGCMLegacyHex(plaintext, keyHex)
 }
