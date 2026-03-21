@@ -46,6 +46,8 @@ func (h *MFAHandler) RegisterRoutes(r *gin.RouterGroup) {
 	r.POST("/auth/mfa/totp/verify-setup", middleware.RequireSession(), h.TOTPVerifySetup)
 	r.POST("/auth/mfa/totp/verify", h.TOTPVerify)
 	r.POST("/auth/mfa/totp/disable", middleware.RequireSession(), h.TOTPDisable)
+	r.GET("/auth/mfa/totp/status", middleware.RequireSession(), h.TOTPStatus)
+	r.POST("/auth/mfa/totp/regenerate-backups", middleware.RequireSession(), h.RegenerateBackupCodes)
 
 	// Passkeys
 	r.POST("/auth/mfa/passkey/register-begin", middleware.RequireSession(), h.PasskeyRegisterBegin)
@@ -58,14 +60,17 @@ func (h *MFAHandler) RegisterRoutes(r *gin.RouterGroup) {
 func (h *MFAHandler) TOTPSetup(c *gin.Context) {
 	sess := middleware.GetSession(c)
 
-	// Generate TOTP secret (handled by tenant-service which stores it)
-	secret := generateRandom(32)
+	// Generate base32-encoded TOTP secret (20 random bytes)
+	secret := crypto.GenerateTOTPSecret(20)
 	encrypted, err := crypto.EncryptAESGCM([]byte(secret), h.cfg.EncryptionKey)
 	if err != nil {
 		slog.Error("mfa: encrypt totp secret", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "SETUP_FAILED"})
 		return
 	}
+
+	// Build otpauth:// URI for QR code generation
+	totpURI := crypto.BuildTOTPURI(secret, sess.Email, "Tesserix")
 
 	// Generate backup codes using the proper formatter (XXXX-XXXX format, unambiguous charset)
 	backupCodes, backupHashes, err := crypto.GenerateBackupCodes(10, h.cfg.BackupCodeHMACKey)
@@ -75,8 +80,9 @@ func (h *MFAHandler) TOTPSetup(c *gin.Context) {
 		return
 	}
 
-	// Store setup temporarily (5 min)
-	setupKey := "totp_setup:" + sess.UserID
+	// Store setup temporarily (5 min) with UUID-based key
+	setupID := uuid.New().String()
+	setupKey := "totp_setup:" + setupID
 	setupData, _ := json.Marshal(map[string]interface{}{
 		"encrypted_secret": encrypted,
 		"backup_codes":     backupCodes,
@@ -85,9 +91,11 @@ func (h *MFAHandler) TOTPSetup(c *gin.Context) {
 	h.ephemeral.Set(setupKey, setupData, 5*time.Minute)
 
 	c.JSON(http.StatusOK, gin.H{
-		"secret":       secret,
-		"backup_codes": backupCodes,
-		"setup_id":     uuid.New().String(),
+		"success":          true,
+		"setup_session":    setupID,
+		"totp_uri":         totpURI,
+		"manual_entry_key": secret,
+		"backup_codes":     backupCodes,
 	})
 }
 
@@ -96,7 +104,8 @@ func (h *MFAHandler) TOTPVerifySetup(c *gin.Context) {
 	sess := middleware.GetSession(c)
 
 	var req struct {
-		Code string `json:"code" binding:"required"`
+		Code         string `json:"code" binding:"required"`
+		SetupSession string `json:"setup_session"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_REQUEST"})
@@ -104,6 +113,9 @@ func (h *MFAHandler) TOTPVerifySetup(c *gin.Context) {
 	}
 
 	setupKey := "totp_setup:" + sess.UserID
+	if req.SetupSession != "" {
+		setupKey = "totp_setup:" + req.SetupSession
+	}
 	data, ok := h.ephemeral.Get(setupKey)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "SETUP_EXPIRED"})
@@ -296,6 +308,81 @@ func (h *MFAHandler) TOTPDisable(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// TOTPStatus returns the current TOTP status for the logged-in user.
+func (h *MFAHandler) TOTPStatus(c *gin.Context) {
+	sess := middleware.GetSession(c)
+
+	totpResp, err := h.tenantClient.GetTOTPSecret(c.Request.Context(), sess.UserID, sess.TenantID)
+	if err != nil {
+		// If tenant-service returns error, assume TOTP not configured
+		slog.Warn("mfa: fetch totp status", "error", err, "user_id", sess.UserID)
+		c.JSON(http.StatusOK, gin.H{
+			"success":                true,
+			"totp_enabled":           false,
+			"backup_codes_remaining": 0,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":                true,
+		"totp_enabled":           totpResp.TOTPEnabled,
+		"backup_codes_remaining": totpResp.BackupCodesRemaining,
+	})
+}
+
+// RegenerateBackupCodes generates new backup codes for the user (requires TOTP to be enabled).
+func (h *MFAHandler) RegenerateBackupCodes(c *gin.Context) {
+	sess := middleware.GetSession(c)
+
+	var req struct {
+		Code string `json:"code" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_REQUEST"})
+		return
+	}
+
+	// Verify TOTP code first
+	totpResp, err := h.tenantClient.GetTOTPSecret(c.Request.Context(), sess.UserID, sess.TenantID)
+	if err != nil || !totpResp.TOTPEnabled {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "TOTP_NOT_ENABLED"})
+		return
+	}
+
+	secret, err := crypto.DecryptAESGCM(totpResp.TOTPSecretEncrypted, h.cfg.EncryptionKey)
+	if err != nil {
+		slog.Error("mfa: decrypt totp secret for backup regeneration", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "VERIFY_FAILED"})
+		return
+	}
+
+	if !crypto.ValidateTOTP(string(secret), req.Code) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "INVALID_CODE"})
+		return
+	}
+
+	// Generate new backup codes
+	backupCodes, backupHashes, err := crypto.GenerateBackupCodes(10, h.cfg.BackupCodeHMACKey)
+	if err != nil {
+		slog.Error("mfa: generate backup codes", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "REGENERATE_FAILED"})
+		return
+	}
+
+	// Persist to tenant-service
+	if err := h.tenantClient.RegenerateBackupCodes(c.Request.Context(), sess.UserID, sess.TenantID, backupHashes); err != nil {
+		slog.Error("mfa: regenerate backup codes", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "REGENERATE_FAILED"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":      true,
+		"backup_codes": backupCodes,
+	})
 }
 
 // PasskeyRegisterBegin starts WebAuthn registration.
