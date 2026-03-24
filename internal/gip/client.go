@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	firebaseauth "firebase.google.com/go/v4/auth"
 	gooidc "github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -54,9 +55,10 @@ type firebaseClaim struct {
 
 // Client manages OIDC providers for Google Identity Platform tenants.
 type Client struct {
-	projectID string
-	providers map[string]*provider // keyed by gipTenantID:oauthClientID
-	mu        sync.RWMutex
+	projectID    string
+	providers    map[string]*provider // keyed by gipTenantID:oauthClientID
+	mu           sync.RWMutex
+	firebaseAuth *firebaseauth.Client // Firebase Admin SDK for tenant-aware token verification
 }
 
 type provider struct {
@@ -68,10 +70,12 @@ type provider struct {
 }
 
 // NewClient initializes GIP OIDC providers for all configured apps.
-func NewClient(ctx context.Context, cfg *config.Config) (*Client, error) {
+// fbAuth is the Firebase Admin SDK auth client used for tenant-aware token verification.
+func NewClient(ctx context.Context, cfg *config.Config, fbAuth *firebaseauth.Client) (*Client, error) {
 	c := &Client{
-		projectID: cfg.GCPProjectID,
-		providers: make(map[string]*provider),
+		projectID:    cfg.GCPProjectID,
+		providers:    make(map[string]*provider),
+		firebaseAuth: fbAuth,
 	}
 
 	seen := make(map[string]bool)

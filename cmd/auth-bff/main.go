@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	firebase "firebase.google.com/go/v4"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 
@@ -44,10 +45,23 @@ func main() {
 	}
 	slog.Info("starting auth-bff", "env", cfg.Environment, "port", cfg.Port)
 
-	// Google Identity Platform client
+	// Firebase Admin App — used by gip.Client for tenant-aware token verification (AUTH-02)
 	gipCtx, gipCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer gipCancel()
-	gipClient, err := gip.NewClient(gipCtx, cfg)
+	fbApp, err := firebase.NewApp(gipCtx, &firebase.Config{ProjectID: cfg.GCPProjectID})
+	if err != nil {
+		slog.Error("firebase: app init failed", "error", err)
+		os.Exit(1)
+	}
+	fbAuthClient, err := fbApp.Auth(gipCtx)
+	if err != nil {
+		slog.Error("firebase: auth client init failed", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("firebase auth client initialized")
+
+	// Google Identity Platform client (receives Firebase auth for tenant verification)
+	gipClient, err := gip.NewClient(gipCtx, cfg, fbAuthClient)
 	if err != nil {
 		slog.Error("gip client init failed", "error", err)
 		os.Exit(1)
