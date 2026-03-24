@@ -24,14 +24,14 @@ import (
 // AuthHandler handles OIDC authentication flows via Google Identity Platform.
 type AuthHandler struct {
 	cfg       *config.Config
-	gip       *gip.Client
+	gip       gip.AuthProvider
 	sessions  *session.CookieStore
 	ephemeral *session.EphemeralStore
 	events    *events.Publisher
 }
 
 // NewAuthHandler creates a new AuthHandler.
-func NewAuthHandler(cfg *config.Config, gipClient *gip.Client, sessions *session.CookieStore, ephemeral *session.EphemeralStore, events *events.Publisher) *AuthHandler {
+func NewAuthHandler(cfg *config.Config, gipClient gip.AuthProvider, sessions *session.CookieStore, ephemeral *session.EphemeralStore, events *events.Publisher) *AuthHandler {
 	return &AuthHandler{
 		cfg:       cfg,
 		gip:       gipClient,
@@ -262,7 +262,9 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 	c.Redirect(http.StatusFound, returnTo)
 }
 
-// Logout clears the session.
+// Logout clears the session cookie and revokes GIP refresh tokens.
+// For browser flows (no Accept: application/json header), redirects to app.PostLogoutURL.
+// For programmatic callers (Accept: application/json), returns JSON per D-08.
 func (h *AuthHandler) Logout(c *gin.Context) {
 	app := middleware.GetApp(c)
 	if app == nil {
@@ -272,14 +274,29 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 
 	sess := middleware.GetSession(c)
 	if sess != nil {
-		h.events.PublishLogout(c.Request.Context(), sess.TenantID, sess.UserID, sess.Email)
+		if h.events != nil {
+			h.events.PublishLogout(c.Request.Context(), sess.TenantID, sess.UserID, sess.Email)
+		}
+		// AUTH-05: Revoke GIP refresh tokens so the token can no longer be used server-side.
+		// Non-fatal -- GIP caches tokens up to 1 hour; clearing the cookie is always done.
+		if sess.UserID != "" {
+			if err := h.gip.RevokeTokens(c.Request.Context(), app, sess.UserID); err != nil {
+				slog.Warn("auth: GIP token revocation failed (non-fatal, cookie will still be cleared)",
+					"user_id", sess.UserID, "error", err)
+			}
+		}
 	}
 
 	host := middleware.GetEffectiveHost(c)
 	cookieDomain := middleware.GetCookieDomain(host, app, h.cfg.PlatformDomain)
 	h.sessions.Clear(c, app.SessionCookie, cookieDomain)
 
-	c.JSON(http.StatusOK, gin.H{"success": true})
+	// D-07 + D-08: Browser flows redirect; programmatic callers get JSON.
+	if c.GetHeader("Accept") == "application/json" {
+		c.JSON(http.StatusOK, gin.H{"success": true})
+		return
+	}
+	c.Redirect(http.StatusFound, app.PostLogoutURL)
 }
 
 // Session returns the current session info (without tokens).

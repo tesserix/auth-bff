@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tesserix/auth-bff/internal/config"
+	"github.com/tesserix/auth-bff/internal/gip"
 	"github.com/tesserix/auth-bff/internal/middleware"
 	"github.com/tesserix/auth-bff/internal/session"
 )
@@ -155,19 +156,23 @@ func TestAuthHandler_Logout_ClearsCookie(t *testing.T) {
 	cfg := newTestConfig()
 	store := session.NewCookieStore(testKey, 24*time.Hour, false)
 	ephemeral := session.NewEphemeralStore()
+	mockGIP := &gip.MockAuthProvider{}
 	h := &AuthHandler{
 		cfg:       cfg,
+		gip:       mockGIP,
 		sessions:  store,
 		ephemeral: ephemeral,
-		events:    nil, // events publisher is nil-safe
+		events:    nil,
 	}
 
 	app := newTestApp()
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("POST", "/auth/logout", nil)
-	c.Request.Host = "tesserix.app"
+	req := httptest.NewRequest("POST", "/auth/logout", nil)
+	req.Header.Set("Accept", "application/json") // programmatic caller -- expect JSON
+	req.Host = "tesserix.app"
+	c.Request = req
 	c.Set(middleware.ContextKeyApp, app)
 
 	h.Logout(c)
@@ -185,6 +190,70 @@ func TestAuthHandler_Logout_ClearsCookie(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected session cookie to be cleared")
+	}
+}
+
+func TestAuthHandler_Logout_BrowserRedirects(t *testing.T) {
+	cfg := newTestConfig()
+	store := session.NewCookieStore(testKey, 24*time.Hour, false)
+	mockGIP := &gip.MockAuthProvider{}
+	h := &AuthHandler{
+		cfg:      cfg,
+		gip:      mockGIP,
+		sessions: store,
+		events:   nil,
+	}
+
+	app := newTestApp() // PostLogoutURL is "/"
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest("POST", "/auth/logout", nil)
+	// No Accept: application/json header -- browser flow
+	req.Host = "tesserix.app"
+	c.Request = req
+	c.Set(middleware.ContextKeyApp, app)
+
+	h.Logout(c)
+
+	if w.Code != http.StatusFound {
+		t.Errorf("expected 302 redirect for browser logout, got %d", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != "/" {
+		t.Errorf("Location = %q, want /", loc)
+	}
+}
+
+func TestAuthHandler_Logout_RevokesTokens(t *testing.T) {
+	cfg := newTestConfig()
+	store := session.NewCookieStore(testKey, 24*time.Hour, false)
+	mockGIP := &gip.MockAuthProvider{}
+	h := &AuthHandler{
+		cfg:      cfg,
+		gip:      mockGIP,
+		sessions: store,
+		events:   nil,
+	}
+
+	app := newTestApp()
+	sess := &session.Session{
+		UserID: "uid-abc",
+		Email:  "user@example.com",
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest("POST", "/auth/logout", nil)
+	req.Header.Set("Accept", "application/json")
+	req.Host = "tesserix.app"
+	c.Request = req
+	c.Set(middleware.ContextKeyApp, app)
+	c.Set(middleware.ContextKeySession, sess)
+
+	h.Logout(c)
+
+	if mockGIP.RevokeCalled != 1 {
+		t.Errorf("RevokeTokens called %d times, want 1", mockGIP.RevokeCalled)
 	}
 }
 
