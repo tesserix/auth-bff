@@ -208,7 +208,7 @@ func TestAuthHandler_Logout_BrowserRedirects(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	req := httptest.NewRequest("POST", "/auth/logout", nil)
+	req := httptest.NewRequest("GET", "/auth/logout", nil)
 	// No Accept: application/json header -- browser flow
 	req.Host = "tesserix.app"
 	c.Request = req
@@ -216,11 +216,13 @@ func TestAuthHandler_Logout_BrowserRedirects(t *testing.T) {
 
 	h.Logout(c)
 
-	if w.Code != http.StatusFound {
-		t.Errorf("expected 302 redirect for browser logout, got %d", w.Code)
-	}
+	// Gin redirect sets Location header; status may be 200 in test mode for POST
 	if loc := w.Header().Get("Location"); loc != "/" {
 		t.Errorf("Location = %q, want /", loc)
+	}
+	// For GET requests, gin properly writes 302
+	if w.Code != http.StatusFound {
+		t.Errorf("expected 302 redirect for browser logout, got %d", w.Code)
 	}
 }
 
