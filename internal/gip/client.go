@@ -198,36 +198,67 @@ func (c *Client) Refresh(ctx context.Context, app *config.AppConfig, refreshToke
 	}, nil
 }
 
-// VerifyIDToken verifies an ID token and extracts claims.
-// Tries the Google OAuth verifier first (for tokens from the authorization code flow),
-// then falls back to the GIP/Firebase verifier (for tokens from the Firebase Auth SDK).
+// Compile-time check: Client must satisfy TokenVerifier interface.
+var _ TokenVerifier = (*Client)(nil)
+
+// VerifyIDToken verifies a GIP ID token using Firebase Admin SDK TenantClient.
+// This enforces GIP tenant pool membership — a token from MP-Customer-cgob2
+// will be rejected when verified against an app configured for MP-Internal-uidfu.
+// Implements the TokenVerifier interface.
 func (c *Client) VerifyIDToken(ctx context.Context, app *config.AppConfig, rawIDToken string) (*IDTokenClaims, error) {
-	p, err := c.getProvider(app)
+	// Use TenantClient so Firebase enforces firebase.tenant claim matches app.GIPTenantID
+	tenantClient, err := c.firebaseAuth.TenantManager.AuthForTenant(app.GIPTenantID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("gip: tenant client for %s: %w", app.GIPTenantID, err)
 	}
 
-	// Try Google OAuth issuer first (accounts.google.com)
-	idToken, err := p.googleVerifier.Verify(ctx, rawIDToken)
+	token, err := tenantClient.VerifyIDToken(ctx, rawIDToken)
 	if err != nil {
-		// Fall back to GIP/Firebase issuer (securetoken.google.com)
-		idToken, err = p.verifier.Verify(ctx, rawIDToken)
-		if err != nil {
-			return nil, fmt.Errorf("gip: verify id token: %w", err)
-		}
+		return nil, fmt.Errorf("gip: verify id token: %w", err)
 	}
 
-	var claims IDTokenClaims
-	if err := idToken.Claims(&claims); err != nil {
-		return nil, fmt.Errorf("gip: extract claims: %w", err)
-	}
-	claims.Subject = idToken.Subject
-	// Populate TenantID from nested firebase.tenant claim
-	if claims.Firebase != nil && claims.Firebase.Tenant != "" {
-		claims.TenantID = claims.Firebase.Tenant
-	}
+	// Extract nonce from raw claims map — Firebase Token does not expose nonce as a first-class field.
+	// If missing, nonce will be "" and the nonce-mismatch check in Callback() will catch it.
+	nonce, _ := token.Claims["nonce"].(string)
 
-	return &claims, nil
+	return &IDTokenClaims{
+		Subject:       token.UID,
+		Email:         getStringClaim(token.Claims, "email"),
+		EmailVerified: getBoolClaim(token.Claims, "email_verified"),
+		TenantID:      token.Firebase.Tenant,
+		Nonce:         nonce,
+		Firebase: &firebaseClaim{
+			Tenant:         token.Firebase.Tenant,
+			SignInProvider: token.Firebase.SignInProvider,
+		},
+	}, nil
+}
+
+// RevokeTokens revokes all GIP refresh tokens for the given Firebase UID.
+// This is best-effort — GIP caches tokens up to 1 hour, so revocation is eventually consistent.
+// The session cookie is always cleared by the caller regardless of revocation success.
+// Implements the TokenVerifier interface.
+func (c *Client) RevokeTokens(ctx context.Context, app *config.AppConfig, userUID string) error {
+	tenantClient, err := c.firebaseAuth.TenantManager.AuthForTenant(app.GIPTenantID)
+	if err != nil {
+		return fmt.Errorf("gip: tenant client for revoke %s: %w", app.GIPTenantID, err)
+	}
+	if err := tenantClient.RevokeRefreshTokens(ctx, userUID); err != nil {
+		return fmt.Errorf("gip: revoke refresh tokens for %s: %w", userUID, err)
+	}
+	return nil
+}
+
+// getStringClaim safely extracts a string from a Firebase token claims map.
+func getStringClaim(claims map[string]interface{}, key string) string {
+	v, _ := claims[key].(string)
+	return v
+}
+
+// getBoolClaim safely extracts a bool from a Firebase token claims map.
+func getBoolClaim(claims map[string]interface{}, key string) bool {
+	v, _ := claims[key].(bool)
+	return v
 }
 
 // PasswordSignInResult holds the response from the GIP REST API signInWithPassword call.

@@ -71,3 +71,38 @@ func TestMockTokenVerifier_RevokeTokens(t *testing.T) {
 		t.Errorf("RevokeCalled = %d, want 1", mock.RevokeCalled)
 	}
 }
+
+// TestGetStringClaim verifies safe string extraction from Firebase claims map.
+func TestGetStringClaim(t *testing.T) {
+	claims := map[string]interface{}{
+		"email": "user@example.com",
+		"other": 42,
+	}
+	if got := getStringClaim(claims, "email"); got != "user@example.com" {
+		t.Errorf("getStringClaim(email) = %q, want user@example.com", got)
+	}
+	if got := getStringClaim(claims, "missing"); got != "" {
+		t.Errorf("getStringClaim(missing) = %q, want empty", got)
+	}
+	// Wrong type — should return ""
+	if got := getStringClaim(claims, "other"); got != "" {
+		t.Errorf("getStringClaim(other int) = %q, want empty", got)
+	}
+}
+
+// TestGetBoolClaim verifies safe bool extraction from Firebase claims map.
+func TestGetBoolClaim(t *testing.T) {
+	claims := map[string]interface{}{
+		"email_verified": true,
+		"other":          "yes",
+	}
+	if !getBoolClaim(claims, "email_verified") {
+		t.Error("getBoolClaim(email_verified=true) should return true")
+	}
+	if getBoolClaim(claims, "missing") {
+		t.Error("getBoolClaim(missing) should return false")
+	}
+	if getBoolClaim(claims, "other") {
+		t.Error("getBoolClaim(string val) should return false")
+	}
+}
