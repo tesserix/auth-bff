@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -133,20 +134,20 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 			errMsg = c.Query("error")
 		}
 		slog.Warn("auth: callback missing code/state", "error", errMsg)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "AUTH_CALLBACK_FAILED", "message": errMsg})
+		redirectWithError(c, "/login", "auth_failed", errMsg)
 		return
 	}
 
 	// Consume flow state (single-use)
 	flowData, ok := h.ephemeral.Consume("authflow:" + state)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_STATE"})
+		redirectWithError(c, "/login", "invalid_state", "Session expired, please try again")
 		return
 	}
 
 	var flowState authFlowState
 	if err := json.Unmarshal(flowData, &flowState); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_STATE"})
+		redirectWithError(c, "/login", "invalid_state", "Session expired, please try again")
 		return
 	}
 
@@ -157,7 +158,7 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 		app = middleware.GetApp(c)
 	}
 	if app == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "UNKNOWN_APP"})
+		redirectWithError(c, "/login", "auth_failed", "Unknown application")
 		return
 	}
 
@@ -176,7 +177,7 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 	tokens, err := h.gip.Exchange(c.Request.Context(), app, code, flowState.CodeVerifier, redirectURI)
 	if err != nil {
 		slog.Error("auth: token exchange failed", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "TOKEN_EXCHANGE_FAILED"})
+		redirectWithError(c, app.PostLogoutURL, "token_exchange_failed", "Authentication failed, please try again")
 		return
 	}
 
@@ -184,14 +185,14 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 	claims, err := h.gip.VerifyIDToken(c.Request.Context(), app, tokens.IDToken)
 	if err != nil {
 		slog.Error("auth: verify id token", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "TOKEN_VERIFICATION_FAILED"})
+		redirectWithError(c, app.PostLogoutURL, "verification_failed", "Token verification failed")
 		return
 	}
 
 	// Verify nonce to prevent replay attacks
 	if claims.Nonce != flowState.Nonce {
 		slog.Warn("auth: nonce mismatch", "user_id", claims.Subject)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "NONCE_MISMATCH"})
+		redirectWithError(c, app.PostLogoutURL, "nonce_mismatch", "Authentication session expired, please try again")
 		return
 	}
 
@@ -206,7 +207,7 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 		}
 		if !allowed {
 			slog.Warn("auth: email not in whitelist", "email", claims.Email, "app", app.Name)
-			c.JSON(http.StatusForbidden, gin.H{"error": "ACCESS_DENIED", "message": "Your account is not authorized to access this application."})
+			redirectWithError(c, app.PostLogoutURL, "access_denied", "Your account is not authorized to access this application")
 			return
 		}
 	}
@@ -246,7 +247,7 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 	cookieDomain := middleware.GetCookieDomain(host, app, h.cfg.PlatformDomain)
 	if err := h.sessions.Save(c, app.SessionCookie, cookieDomain, sess); err != nil {
 		slog.Error("auth: save session", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "SESSION_CREATE_FAILED"})
+		redirectWithError(c, app.PostLogoutURL, "session_error", "Failed to create session")
 		return
 	}
 
@@ -502,6 +503,26 @@ func extractTenantSlugFromURL(rawURL, platformDomain string) string {
 		}
 	}
 	return ""
+}
+
+// redirectWithError redirects the browser to targetURL with error context as query params.
+// Used for browser-flow errors per D-07: failed auth redirects to login page, not blank error page.
+// errorCode uses snake_case (e.g., "invalid_state", "token_exchange_failed").
+// reason is optional human-readable context shown to the user by the Next.js app.
+func redirectWithError(c *gin.Context, targetURL, errorCode, reason string) {
+	u, err := url.Parse(targetURL)
+	if err != nil {
+		// Fallback: plain redirect without query params rather than showing nothing
+		c.Redirect(http.StatusFound, targetURL+"?error="+errorCode)
+		return
+	}
+	q := u.Query()
+	q.Set("error", errorCode)
+	if reason != "" {
+		q.Set("reason", reason)
+	}
+	u.RawQuery = q.Encode()
+	c.Redirect(http.StatusFound, u.String())
 }
 
 func generateRandom(length int) string {

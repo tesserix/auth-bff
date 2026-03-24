@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -214,6 +215,44 @@ func TestAuthHandler_Login_NoApp(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 for unknown app, got %d", w.Code)
+	}
+}
+
+func TestRedirectWithError_BuildsURL(t *testing.T) {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/auth/callback", nil)
+
+	redirectWithError(c, "https://example.com/login", "invalid_state", "Session expired")
+
+	if w.Code != http.StatusFound {
+		t.Errorf("expected 302, got %d", w.Code)
+	}
+	loc := w.Header().Get("Location")
+	if !strings.Contains(loc, "error=invalid_state") {
+		t.Errorf("location %q missing error=invalid_state", loc)
+	}
+	if !strings.Contains(loc, "reason=") {
+		t.Errorf("location %q missing reason param", loc)
+	}
+}
+
+func TestRedirectWithError_NoReason(t *testing.T) {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/auth/callback", nil)
+
+	redirectWithError(c, "/login", "auth_failed", "")
+
+	if w.Code != http.StatusFound {
+		t.Errorf("expected 302, got %d", w.Code)
+	}
+	loc := w.Header().Get("Location")
+	if !strings.Contains(loc, "error=auth_failed") {
+		t.Errorf("location %q missing error=auth_failed", loc)
+	}
+	if strings.Contains(loc, "reason=") {
+		t.Errorf("location %q should not have reason= when reason is empty", loc)
 	}
 }
 
