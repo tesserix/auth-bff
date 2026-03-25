@@ -8,6 +8,7 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'Dockerfile'
+      - 'products.yaml'
       - '.github/workflows/ci.yml'
   pull_request:
     branches: [main]
