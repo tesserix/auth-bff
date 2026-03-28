@@ -96,7 +96,7 @@ func (c *TenantClient) ValidateCredentials(ctx context.Context, req *ValidateCre
 		Success bool                        `json:"success"`
 		Data    *ValidateCredentialsResponse `json:"data"`
 	}
-	err := c.client.Post(ctx, "/api/v1/auth/validate-credentials", req, &wrapper)
+	err := c.client.Post(ctx, "/api/v1/auth/validate", req, &wrapper)
 	if err != nil {
 		// serviceclient returns error for 4xx — parse the JSON body from the error message
 		// to extract structured failure info (account_locked, error_code, etc.)
