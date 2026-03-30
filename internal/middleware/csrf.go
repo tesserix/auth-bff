@@ -6,6 +6,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// csrfExemptPaths lists POST endpoints exempt from CSRF validation.
+// lookup-tenants: read-like operation (email → tenant list), no state change.
+// ws-ticket: creates ephemeral ticket, already gated by session auth.
+var csrfExemptPaths = map[string]bool{
+	"/auth/direct/lookup-tenants": true,
+	"/auth/ws-ticket":             true,
+}
+
 // CSRFProtection validates the CSRF token for state-changing requests.
 // Uses double-submit cookie pattern: token in session must match X-CSRF-Token header.
 func CSRFProtection() gin.HandlerFunc {
@@ -14,6 +22,12 @@ func CSRFProtection() gin.HandlerFunc {
 		if c.Request.Method == http.MethodGet ||
 			c.Request.Method == http.MethodHead ||
 			c.Request.Method == http.MethodOptions {
+			c.Next()
+			return
+		}
+
+		// Skip exempt paths
+		if csrfExemptPaths[c.Request.URL.Path] {
 			c.Next()
 			return
 		}

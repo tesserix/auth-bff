@@ -70,8 +70,67 @@ func NewDirectAuthHandler(
 // RegisterRoutes registers direct authentication endpoints.
 func (h *DirectAuthHandler) RegisterRoutes(r *gin.RouterGroup) {
 	r.POST("/auth/direct/admin/login", h.AdminLogin)
+	r.POST("/auth/direct/lookup-tenants", h.LookupTenants)
 	r.POST("/auth/direct/mfa/verify", h.MFAVerify)
 	r.POST("/auth/direct/mfa/send-code", h.MFASendCode)
+	r.POST("/auth/ws-ticket", h.WsTicket)
+}
+
+// LookupTenants returns tenants associated with an email address.
+// Used by the admin login flow for tenant selection.
+func (h *DirectAuthHandler) LookupTenants(c *gin.Context) {
+	var req struct {
+		Email string `json:"email" binding:"required,email"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "INVALID_REQUEST", "message": "Valid email is required"})
+		return
+	}
+
+	resp, err := h.tenantClient.GetUserTenants(c.Request.Context(), req.Email)
+	if err != nil {
+		slog.Error("lookup-tenants: tenant-service call failed", "error", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"error":   "SERVICE_UNAVAILABLE",
+			"message": "Unable to look up tenants at this time.",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":       true,
+		"tenants":       resp.Tenants,
+		"count":         resp.Count,
+		"single_tenant": resp.SingleTenant,
+	})
+}
+
+// WsTicket issues a short-lived ticket for WebSocket authentication.
+func (h *DirectAuthHandler) WsTicket(c *gin.Context) {
+	sess := middleware.GetSession(c)
+	if sess == nil || sess.UserID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "NOT_AUTHENTICATED"})
+		return
+	}
+
+	// Generate a random ticket
+	ticketBytes := make([]byte, 32)
+	if _, err := rand.Read(ticketBytes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "TICKET_GENERATION_FAILED"})
+		return
+	}
+	ticket := hex.EncodeToString(ticketBytes)
+
+	// Store ticket in ephemeral store with 60-second TTL
+	ticketData := map[string]string{
+		"user_id":   sess.UserID,
+		"tenant_id": sess.TenantID,
+	}
+	ticketJSON, _ := json.Marshal(ticketData)
+	h.ephemeral.Set("ws_ticket:"+ticket, ticketJSON, 60*time.Second)
+
+	c.JSON(http.StatusOK, gin.H{"ticket": ticket})
 }
 
 // AdminLogin authenticates admin/staff users via tenant-service credential validation.

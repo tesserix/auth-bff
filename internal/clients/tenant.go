@@ -40,12 +40,18 @@ type UserTenantsResponse struct {
 }
 
 // GetUserTenants looks up tenants associated with an email.
+// tenant-service wraps responses as { success, data: { tenants, count } }.
 func (c *TenantClient) GetUserTenants(ctx context.Context, email string) (*UserTenantsResponse, error) {
 	body := map[string]string{"email": email}
-	var resp UserTenantsResponse
-	if err := c.client.Post(ctx, "/api/v1/auth/lookup-tenants", body, &resp); err != nil {
+	var wrapper struct {
+		Success bool                `json:"success"`
+		Data    UserTenantsResponse `json:"data"`
+	}
+	if err := c.client.Post(ctx, "/api/v1/auth/tenants", body, &wrapper); err != nil {
 		return nil, err
 	}
+	resp := wrapper.Data
+	resp.SingleTenant = resp.Count == 1
 	return &resp, nil
 }
 
